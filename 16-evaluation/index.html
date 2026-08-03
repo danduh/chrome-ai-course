@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evaluation — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    .label-h { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em;
+      opacity: .7; margin: 1rem 0 .4rem; }
+    .pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .pill { border-radius: 999px; padding: .35rem .8rem; font-size: .9rem; }
+    .pill.on { background: #06c; color: #fff; border-color: #06c; }
+    .caseview { border: 1px solid #8884; border-radius: .5rem; padding: .6rem .75rem;
+      margin: .6rem 0; }
+    .api { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
+      background: #8882; padding: .1em .4em; border-radius: .3em; }
+    .cv-input { white-space: pre-wrap; background: #8881; padding: .5rem; border-radius: .4rem;
+      font-size: .9rem; margin: .5rem 0; }
+    .cv-rule { font-size: .92rem; margin: .25rem 0 0; }
+    .muted { opacity: .7; font-size: .85rem; }
+    .actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: .9rem 0; }
+    .n.on { background: #333; color: #fff; border-color: #333; }
+    .dots { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0; }
+    .dot { width: 1rem; height: 1rem; border-radius: 999px; display: inline-block; }
+    .dot.pass { background: #2a7; } .dot.fail { background: #d44; } .dot.err { background: #999; }
+    .rate { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .5rem 0; }
+    .badge { border-radius: .5rem; padding: .3rem .7rem; font-size: .9rem; font-weight: 600;
+      border: 1px solid #8884; }
+    .badge.good { border-color: #2a7; } .badge.mid { border-color: #c93; }
+    .badge.bad { border-color: #d44; } .badge.gray { opacity: .7; }
+    .runs { list-style: none; padding: 0; margin: .5rem 0 0; }
+    .runs li { font-size: .85rem; margin: .35rem 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .mono.ok { color: #2a7; } .mono.bad { color: #d44; } .mono.mut { color: #999; }
+    .out { white-space: pre-wrap; background: #8881; padding: .35rem .5rem; border-radius: .35rem;
+      margin: .25rem 0 0; }
+    .caseblock { border-top: 1px solid #8883; padding-top: .5rem; margin-top: .5rem; }
+    .crow { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .cname { min-width: 12rem; }
+    .foot { margin-top: 1.5rem; font-size: .82rem; opacity: .8; }
+  </style>
+</head>
+<body>
+  <h1>Evaluation — a browser mini-eval harness</h1>
+  <p>A tiny golden set for Chrome's on-device AI (Gemini Nano). Pick a case, run it
+    many times, and read the <em>stability rate</em> — with infra errors counted
+    apart from model failures. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/evaluation">Evaluation</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <p class="label-h">Golden set</p>
+  <div id="cases" class="pills"></div>
+  <div id="caseView" class="caseview"></div>
+
+  <div class="actions">
+    <span class="muted">Runs:</span>
+    <button class="n" data-n="5">5&times;</button>
+    <button class="n" data-n="8">8&times;</button>
+    <button class="n" data-n="10">10&times;</button>
+    <button id="run" disabled>Run eval</button>
+  </div>
+
+  <div id="results" aria-live="polite"></div>
+
+  <p class="foot">&#128274; Runs entirely on-device in your browser. These are
+    <em>rule-based</em> checks — regular code, no second model. See the lesson for
+    LLM-as-judge and running this in CI.</p>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `Summarizer`, `Translator`,
+    // and `LanguageModel` globals — Gemini Nano, on-device. Mirrors the shipped
+    // MiniEval: golden set -> deterministic check -> run N times -> stability rate,
+    // with ERROR (the harness broke) kept separate from FAIL (the model was wrong).
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/evaluation';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/evaluation';
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const casesEl = document.getElementById('cases');
+    const caseViewEl = document.getElementById('caseView');
+    const runBtn = document.getElementById('run');
+    const resultsEl = document.getElementById('results');
+    const nButtons = Array.prototype.slice.call(document.querySelectorAll('.n'));
+
+    // --- The golden set: trusted inputs + a deterministic, rule-based check each ---
+    const wordCount = (s) => s.trim().split(/\s+/).filter(Boolean).length;
+    const lineCount = (s) => s.split('\n').map((l) => l.trim()).filter(Boolean).length;
+
+    const SAMPLE =
+      'Chrome ships several built-in AI APIs that run entirely on-device using Gemini Nano. ' +
+      'Because inference happens locally, there is no server round-trip, no per-request cost, ' +
+      'and no data leaves the machine. Developers can prompt, summarize, translate, write, and ' +
+      'proofread without any backend or API key.';
+    const TRANSLATE_INPUT = 'On-device AI keeps your data on your machine — no server, no cost.';
+
+    const EVAL_CASES = [
+      {
+        id: 'summary-short',
+        name: 'Summary is short',
+        api: 'summarizer',
+        summaryType: 'tl;dr',
+        input: SAMPLE,
+        rule: 'non-empty and \u2264 40 words',
+        check: (o) => {
+          const w = wordCount(o);
+          return { pass: o.trim().length > 0 && w <= 40, reason: w + ' words' };
+        },
+      },
+      {
+        id: 'summary-keypoints',
+        name: 'Summary has multiple points',
+        api: 'summarizer',
+        summaryType: 'key-points',
+        input: SAMPLE,
+        rule: 'at least 2 bullet points / lines',
+        check: (o) => {
+          const n = lineCount(o);
+          return { pass: n >= 2, reason: n + ' lines' };
+        },
+      },
+      {
+        id: 'translate-produced',
+        name: 'Translation is produced',
+        api: 'translator',
+        input: TRANSLATE_INPUT,
+        rule: 'non-empty and different from the English input',
+        check: (o) => ({
+          pass: o.trim().length > 0 && o.trim() !== TRANSLATE_INPUT,
+          reason: o.trim().length + ' chars',
+        }),
+      },
+      {
+        id: 'prompt-yesno',
+        name: 'Answers yes / no only',
+        api: 'prompt',
+        input: "Answer with only the single word 'yes' or 'no'. Is the sky blue on a clear day?",
+        rule: 'output is exactly "yes" or "no"',
+        check: (o) => {
+          const a = o.trim().toLowerCase().replace(/[.!"']/g, '');
+          return { pass: a === 'yes' || a === 'no', reason: 'got "' + o.trim().slice(0, 40) + '"' };
+        },
+      },
+    ];
+
+    let selectedId = EVAL_CASES[0].id; // default to a Summarizer case (widely available)
+    let runsN = 8;
+    let busy = false;
+    let activeRunner = null;
+
+    const esc = (s) =>
+      String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const currentCase = () => EVAL_CASES.find((c) => c.id === selectedId) || EVAL_CASES[0];
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err',
+      );
+      runBtn.disabled = true;
+      nButtons.forEach((b) => (b.disabled = true));
+    }
+
+    // --- Bare-global helpers: feature-detect + option shapes per API ---
+    function apiGlobal(api) {
+      if (api === 'summarizer') return typeof Summarizer !== 'undefined' ? Summarizer : null;
+      if (api === 'translator') return typeof Translator !== 'undefined' ? Translator : null;
+      return typeof LanguageModel !== 'undefined' ? LanguageModel : null;
+    }
+    function globalName(api) {
+      return api === 'summarizer' ? 'Summarizer' : api === 'translator' ? 'Translator' : 'LanguageModel';
+    }
+    // Options used both to probe availability() and to create() — always outputLanguage:'en'.
+    function optsFor(c) {
+      if (c.api === 'summarizer')
+        return { type: c.summaryType || 'tl;dr', format: 'plain-text', outputLanguage: 'en' };
+      if (c.api === 'translator') return { sourceLanguage: 'en', targetLanguage: 'es' };
+      return { outputLanguage: 'en' };
+    }
+    function named(name) {
+      const e = new Error(name);
+      e.name = name;
+      return e;
+    }
+
+    // Download progress -> the shared progress bar. e.loaded is a 0..1 fraction.
+    function monitor(m) {
+      m.addEventListener('downloadprogress', (e) => {
+        dlEl.hidden = false;
+        dlEl.value = e.loaded;
+        setStatus('Downloading model\u2026 ' + Math.round(e.loaded * 100) + '%', 'warn');
+      });
+    }
+
+    // Build one runner for a case: gate on availability(), then create() with a
+    // monitor. A missing global or an `unavailable` state throws -> the caller
+    // turns that into ERROR runs, never FAIL. That is the ERROR-vs-FAIL rule.
+    async function makeRunner(c) {
+      const Global = apiGlobal(c.api);
+      if (!Global) throw named('unavailable');
+      const opts = optsFor(c);
+      const state = await Global.availability(opts);
+      if (state === 'unavailable') throw named('unavailable');
+      const instance = await Global.create({ ...opts, monitor });
+      if (c.api === 'summarizer')
+        return { call: () => instance.summarize(c.input), destroy: () => instance.destroy() };
+      if (c.api === 'translator')
+        return { call: () => instance.translate(c.input), destroy: () => instance.destroy() };
+      return { call: () => instance.prompt(c.input), destroy: () => instance.destroy() };
+    }
+
+    // Run one case N times, scoring each output. onUpdate renders as results land.
+    async function runCase(c, n, onUpdate) {
+      const results = [];
+      const update = () => onUpdate && onUpdate(results);
+      let runner;
+      try {
+        runner = await makeRunner(c);
+      } catch (e) {
+        // create()/availability() failed before any run — every run is an infra
+        // ERROR, NOT a FAIL. A FAIL you didn't earn would skew the stability rate.
+        const reason = e && e.name ? e.name : 'create failed';
+        for (let i = 0; i < n; i++) results.push({ index: i, status: 'error', reason });
+        update();
+        return results;
+      }
+      activeRunner = runner;
+      dlEl.hidden = true;
+      try {
+        for (let i = 0; i < n; i++) {
+          try {
+            const output = await runner.call();
+            const r = c.check(output); // deterministic — regular code, no model
+            results.push({ index: i, status: r.pass ? 'pass' : 'fail', reason: r.reason, output });
+          } catch (e) {
+            results.push({ index: i, status: 'error', reason: e && e.name ? e.name : 'run failed' });
+          }
+          update();
+        }
+      } finally {
+        try {
+          runner.destroy(); // free GPU memory
+        } catch {
+          /* already gone */
+        }
+        activeRunner = null;
+      }
+      return results;
+    }
+
+    // --- Scoring: passed / scored, with ERROR excluded from the denominator ---
+    function summarize(results) {
+      const passed = results.filter((r) => r.status === 'pass').length;
+      const failed = results.filter((r) => r.status === 'fail').length;
+      const errored = results.filter((r) => r.status === 'error').length;
+      const scored = passed + failed; // ERROR != FAIL — infra errors are not scored
+      const rate = scored > 0 ? Math.round((passed / scored) * 100) : null;
+      return { passed, failed, errored, scored, rate };
+    }
+    const badgeClass = (rate) => (rate == null ? 'gray' : rate >= 80 ? 'good' : rate >= 50 ? 'mid' : 'bad');
+
+    function dotSpan(r) {
+      const cls = r.status === 'pass' ? 'dot pass' : r.status === 'fail' ? 'dot fail' : 'dot err';
+      const title = 'run ' + (r.index + 1) + ': ' + r.status + (r.reason ? ' \u2014 ' + r.reason : '');
+      return '<span class="' + cls + '" title="' + esc(title) + '"></span>';
+    }
+    function perRun(r) {
+      const cls = r.status === 'pass' ? 'ok' : r.status === 'fail' ? 'bad' : 'mut';
+      let li =
+        '<li><span class="mono ' + cls + '">' + r.status.toUpperCase() + '</span> run ' +
+        (r.index + 1) + (r.reason ? ' \u2014 ' + esc(r.reason) : '');
+      if (r.output && r.output.trim()) li += '<div class="out">' + esc(r.output) + '</div>';
+      return li + '</li>';
+    }
+
+    function renderSingle(c, results, n) {
+      const s = summarize(results);
+      let html = '<div class="dots">' + results.map(dotSpan).join('') + '</div>';
+      if (results.length) {
+        html += '<div class="rate">';
+        html +=
+          s.rate != null
+            ? '<span class="badge ' + badgeClass(s.rate) + '">passed ' + s.passed + '/' + s.scored +
+              ' \u00b7 ' + s.rate + '% stable</span>'
+            : '<span class="badge gray">0 scored runs</span>';
+        if (s.errored)
+          html += '<span class="muted">' + s.errored + ' errored (infra \u2014 not counted, ERROR \u2260 FAIL)</span>';
+        html += '</div>';
+        if (results.length >= n)
+          html += '<p class="muted">A single pass/fail would hide this — the model is non-deterministic.</p>';
+        html += '<details><summary class="muted">Per-run detail</summary><ul class="runs">' +
+          results.map(perRun).join('') + '</ul></details>';
+      }
+      resultsEl.innerHTML = html;
+    }
+
+    function renderCompact(c, results) {
+      const s = summarize(results);
+      let html = '<div class="crow">';
+      html += '<div class="cname"><span class="api">' + c.api + '</span> ' + esc(c.name) + '</div>';
+      html += '<div class="dots">' + results.map(dotSpan).join('') + '</div>';
+      html +=
+        s.rate != null
+          ? '<span class="badge ' + badgeClass(s.rate) + '">' + s.passed + '/' + s.scored + ' \u00b7 ' + s.rate + '%</span>'
+          : '<span class="badge gray">no scored runs</span>';
+      if (s.errored) html += '<span class="muted">' + s.errored + ' err</span>';
+      html += '</div>';
+      return html;
+    }
+
+    // --- UI: golden-set pills, run-count buttons, the selected case view ---
+    function renderPills() {
+      let html = EVAL_CASES.map(
+        (c) => '<button class="pill' + (c.id === selectedId ? ' on' : '') + '" data-id="' + c.id + '">' + esc(c.name) + '</button>',
+      ).join('');
+      html += '<button class="pill' + ('all' === selectedId ? ' on' : '') + '" data-id="all">All cases</button>';
+      casesEl.innerHTML = html;
+    }
+    function renderCaseView() {
+      if (selectedId === 'all') {
+        caseViewEl.innerHTML =
+          '<p class="muted">Runs every case in the golden set, one after another — each ' +
+          runsN + '\u00d7, each with its own stability rate.</p>';
+        return;
+      }
+      const c = currentCase();
+      caseViewEl.innerHTML =
+        '<div><span class="api">' + c.api + '</span> <span class="muted">input sent to the model</span></div>' +
+        '<p class="cv-input">' + esc(c.input) + '</p>' +
+        '<p class="cv-rule"><span class="muted">Passes when:</span> ' + esc(c.rule) + '</p>';
+    }
+    function markRunButtons() {
+      nButtons.forEach((b) => b.classList.toggle('on', Number(b.dataset.n) === runsN));
+    }
+
+    // Probe the selected case's API so the status line tells the truth up front —
+    // and an unavailable API is framed as a coming ERROR, not a model FAIL.
+    async function probeSelected() {
+      if (selectedId === 'all') {
+        setStatus('Runs every case, one after another. Pick a run count and go.', 'ok');
+        return;
+      }
+      const c = currentCase();
+      const Global = apiGlobal(c.api);
+      const name = globalName(c.api);
+      if (!Global) {
+        setStatus(
+          '<code>' + name + '</code> is missing here — this case reports ERROR (infra), not FAIL.',
+          'warn',
+        );
+        return;
+      }
+      let state;
+      try {
+        state = await Global.availability(optsFor(c));
+      } catch {
+        state = 'unavailable';
+      }
+      if (state === 'unavailable') {
+        setStatus(
+          '<code>' + name + '</code> reports <code>unavailable</code> — running this case yields ERROR (infra), not FAIL.',
+          'warn',
+        );
+      } else if (state === 'available') {
+        setStatus('Model ready. Run the eval.', 'ok');
+      } else {
+        setStatus('Model needs a one-time download (a few GB) — it starts on your first run.', 'warn');
+      }
+    }
+
+    function setBusy(b) {
+      busy = b;
+      runBtn.disabled = b;
+      runBtn.textContent = b ? 'Running\u2026' : 'Run eval';
+      nButtons.forEach((btn) => (btn.disabled = b));
+      casesEl.querySelectorAll('.pill').forEach((p) => (p.disabled = b));
+    }
+
+    async function run() {
+      if (busy) return;
+      setBusy(true);
+      resultsEl.innerHTML = '';
+      try {
+        if (selectedId === 'all') {
+          for (const c of EVAL_CASES) {
+            const holder = document.createElement('div');
+            holder.className = 'caseblock';
+            resultsEl.appendChild(holder);
+            await runCase(c, runsN, (rs) => (holder.innerHTML = renderCompact(c, rs)));
+          }
+          setStatus('Done. Four cases, each ' + runsN + '\u00d7. Gray dots are infra ERRORs, not model FAILs.', 'ok');
+        } else {
+          const c = currentCase();
+          setStatus('Running ' + c.name + ' ' + runsN + '\u00d7\u2026', 'warn');
+          await runCase(c, runsN, (rs) => renderSingle(c, rs, runsN));
+          setStatus('Done. Change the case or the run count and go again.', 'ok');
+        }
+      } finally {
+        setBusy(false);
+        dlEl.hidden = true;
+      }
+    }
+
+    // --- Wiring ---
+    casesEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.pill');
+      if (!btn || busy) return;
+      selectedId = btn.dataset.id;
+      resultsEl.innerHTML = '';
+      renderPills();
+      renderCaseView();
+      probeSelected();
+    });
+    nButtons.forEach((btn) =>
+      btn.addEventListener('click', () => {
+        if (busy) return;
+        runsN = Number(btn.dataset.n);
+        markRunButtons();
+        if (selectedId === 'all') renderCaseView();
+      }),
+    );
+    runBtn.addEventListener('click', run);
+
+    // Free GPU memory if the tab closes mid-run.
+    window.addEventListener('beforeunload', () => {
+      if (activeRunner) {
+        try {
+          activeRunner.destroy();
+        } catch {
+          /* already gone */
+        }
+      }
+    });
+
+    function init() {
+      renderPills();
+      renderCaseView();
+      markRunButtons();
+      const hasAny =
+        typeof Summarizer !== 'undefined' ||
+        typeof Translator !== 'undefined' ||
+        typeof LanguageModel !== 'undefined';
+      if (!hasAny) {
+        degrade(
+          'This browser has no built-in AI globals (<code>Summarizer</code>, <code>Translator</code>, <code>LanguageModel</code>). You need desktop Chrome with built-in AI.',
+        );
+        return;
+      }
+      runBtn.disabled = false;
+      probeSelected();
+    }
+
+    init();
+  </script>
+</body>
+</html>
