@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>An MCP client in the browser — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text] { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .field label.inline { display: inline-flex; align-items: center; gap: .4rem; margin-right: 1rem; opacity: 1; }
+    .field label.inline input { width: auto; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    section { border: 1px solid #8883; border-radius: .6rem; padding: .25rem 1rem 1rem; margin: 1rem 0; }
+    .chip { display: inline-block; padding: .1rem .55rem; border-radius: 1rem;
+      border: 1px solid #8886; font-size: .85rem; }
+    .kv { margin: .4rem 0; } .kv b { font-weight: 600; }
+    .tool { margin: .4rem 0; } .tool b { font-weight: 600; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem;
+      background: #8881; border-radius: .5rem; padding: .5rem .75rem; margin: .5rem 0;
+      min-height: 2rem; white-space: pre-wrap; }
+    .log .step { padding: .15rem 0; border-bottom: 1px dashed #8883; }
+    .log .step:last-child { border-bottom: 0; }
+    .muted { opacity: .7; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>An MCP client in the browser</h1>
+  <p>The page is the MCP <em>client</em>: it runs the JSON-RPC handshake
+    (<code>initialize</code> → <code>tools/list</code>) against an MCP server over
+    Streamable HTTP, then hands the discovered tools to Chrome's built-in
+    <code>LanguageModel</code> (Gemini Nano), which drives them through a
+    <code>responseFormat</code> intent loop. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/mcp-client">An MCP client in the browser</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <!-- Part A: connect to an MCP server -->
+  <section>
+    <h2>1 · Connect to an MCP server</h2>
+    <p class="muted">The default mock server answers <code>initialize</code>,
+      <code>tools/list</code> and <code>tools/call</code> in-page, so the whole
+      loop runs offline with no network and no CORS. Switch to a remote URL to
+      speak to a real server.</p>
+    <div class="field">
+      <label class="inline"><input type="radio" name="mode" value="mock" checked /> Mock MCP server (in-page, offline)</label>
+      <label class="inline"><input type="radio" name="mode" value="remote" /> Remote MCP server (URL)</label>
+    </div>
+    <div id="remoteFields" hidden>
+      <div class="field">
+        <label for="url">Server URL</label>
+        <input type="text" id="url" value="http://localhost:9339/mcp" spellcheck="false" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="token">Bearer token (optional)</label>
+        <input type="text" id="token" placeholder="sent as Authorization: Bearer …" spellcheck="false" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="proxy">CORS proxy prefix (optional)</label>
+        <input type="text" id="proxy" placeholder="e.g. http://localhost:8080/ — prepended to the URL" spellcheck="false" autocomplete="off" />
+      </div>
+      <p class="muted">Browser → remote MCP is CORS-gated: the server must send
+        <code>Access-Control-Allow-Origin</code> for this origin and expose
+        <code>Mcp-Session-Id</code>. If it doesn't, run a CORS proxy and put its
+        address in the prefix (or in the URL). The bearer token is kept in memory
+        only — never stored, never logged.</p>
+    </div>
+    <div class="actions">
+      <button id="connectBtn" disabled>Connect</button>
+      <button id="disconnectBtn" disabled>Disconnect</button>
+    </div>
+    <div id="conn" class="output" aria-live="polite"></div>
+  </section>
+
+  <!-- Part B: the on-device agent loop -->
+  <section>
+    <h2>2 · Ask the on-device agent</h2>
+    <p class="muted">Gemini Nano runs the intent loop: it emits one JSON tool call
+      per turn, the page dispatches it to the server as <code>tools/call</code>,
+      the result feeds back, and it repeats — capped at 8 turns.</p>
+    <div id="agentNote" class="muted"></div>
+    <div class="field">
+      <label for="question">Your request</label>
+      <input type="text" id="question"
+        value="What is 21 plus 21, then multiply the result by 2?" />
+    </div>
+    <div class="actions">
+      <button id="runBtn" disabled>Ask</button>
+    </div>
+    <div class="muted">Tool-call log</div>
+    <div id="log" class="log" aria-live="polite"></div>
+    <div class="muted">Final reply</div>
+    <div id="reply" class="output" aria-live="polite"></div>
+  </section>
+
+  <script>
+    // Plain browser JS. No frameworks, no SDK. The browser is an MCP CLIENT:
+    // raw JSON-RPC 2.0 over Streamable HTTP (fetch), then Chrome's `LanguageModel`
+    // global drives the remote tools through a responseFormat intent loop.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/mcp-client';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/mcp-client';
+    const MAX_TOOL_CALLS = 8;              // guard against a runaway loop
+    const PROTOCOL_VERSION = '2025-06-18'; // MCP protocol version we advertise
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const remoteFields = document.getElementById('remoteFields');
+    const urlEl = document.getElementById('url');
+    const tokenEl = document.getElementById('token');
+    const proxyEl = document.getElementById('proxy');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const connEl = document.getElementById('conn');
+    const agentNote = document.getElementById('agentNote');
+    const questionEl = document.getElementById('question');
+    const runBtn = document.getElementById('runBtn');
+    const logEl = document.getElementById('log');
+    const replyEl = document.getElementById('reply');
+
+    let transport = null;      // the connected transport (mock or http)
+    let connection = null;     // { serverName, serverVersion, capabilities, tools }
+    let agentSession = null;   // the LanguageModel session
+    let agentToolsKey = '';    // recreate the session when the tool set changes
+    let nanoReady = false;
+    let busy = false;
+    let rpcId = 0;             // JSON-RPC request id counter
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+    function errName(e) { return e && e.name ? e.name : 'Error'; }
+    function errMessage(e) { return e && e.message ? e.message : String(e); }
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // =====================================================================
+    // The intent-loop schema and helpers (shared by every MCP server).
+    // =====================================================================
+
+    // responseFormat schema — constrains Nano to emit ONE JSON tool call.
+    const INTENT_SCHEMA = {
+      type: 'object',
+      required: ['toolName'],
+      additionalProperties: false,
+      properties: {
+        toolName: { type: 'string', description: 'Tool to call next, or "done" to reply.' },
+        args: { type: 'object', description: 'Arguments object for the tool (omit when done).' },
+        reply: { type: 'string', description: 'Final answer — only when toolName is "done".' },
+      },
+    };
+
+    // Even with responseFormat, some builds wrap JSON in a fence. 3 tiers:
+    // direct parse -> strip a ```json ... ``` fence -> extract the first { ... }.
+    function extractJsonFromResponse(text) {
+      const s = String(text == null ? '' : text).trim();
+      try { return JSON.parse(s); } catch (e) { /* fall through */ }
+      const fenced = s.match(/^`{3}(?:json)?\s*\n?([\s\S]*?)\n?`{3}$/);
+      if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch (e) { /* fall through */ } }
+      const braces = s.match(/\{[\s\S]*\}/);
+      if (braces) { try { return JSON.parse(braces[0]); } catch (e) { /* give up */ } }
+      return null;
+    }
+
+    // Small models sometimes emit args as a JSON STRING; normalize to an object.
+    function coerceArgs(value) {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        } catch (e) { /* not JSON */ }
+      }
+      return {};
+    }
+
+    // Compact one-line rendering of a tool's inputSchema, e.g. `{ "a": number (required) }`.
+    function renderSchemaProperties(inputSchema) {
+      const props = inputSchema && typeof inputSchema.properties === 'object' && inputSchema.properties
+        ? inputSchema.properties : {};
+      const required = Array.isArray(inputSchema && inputSchema.required) ? inputSchema.required : [];
+      const entries = Object.entries(props);
+      if (entries.length === 0) return '{}';
+      const rendered = entries.map(function (pair) {
+        const spec = pair[1] && typeof pair[1] === 'object' ? pair[1] : {};
+        const type = typeof spec.type === 'string' ? spec.type : 'any';
+        return '"' + pair[0] + '": ' + type + (required.indexOf(pair[0]) !== -1 ? ' (required)' : '');
+      }).join(', ');
+      return '{ ' + rendered + ' }';
+    }
+
+    // The system prompt teaches the JSON dispatch protocol and lists the
+    // connected server's tools, so Nano only ever names a real tool.
+    function buildSystemPrompt(tools) {
+      const toolLines = tools.length === 0
+        ? '(no tools available — emit { "toolName": "done", "reply": "..." })'
+        : tools.map(function (t) {
+            const desc = t.description ? ' — ' + t.description : '';
+            return '- ' + t.name + desc + '\n  args: ' + renderSchemaProperties(t.inputSchema);
+          }).join('\n');
+      const validNames = tools.map(function (t) { return t.name; }).join(', ');
+      return [
+        'You fulfil the user\u2019s request by calling tools exposed by a connected MCP server.',
+        'Respond with ONE JSON object and nothing else — no markdown, no code fences.',
+        'Format: { "toolName": "<name or done>", "args": { ... }, "reply": "<only when done>" }',
+        '',
+        'Available tools (call ONE per turn; the host executes it and feeds you the result):',
+        toolLines,
+        '',
+        'Valid tool names: ' + (validNames || '(none)'),
+        '',
+        'Rules:',
+        '1. Call ONE tool per turn and wait for its result before the next step.',
+        '2. Only use a tool name from the list above.',
+        '3. Fill "args" from the tool\u2019s argument schema.',
+        '4. When done (or no tool is needed), emit { "toolName": "done", "reply": "..." }.',
+      ].join('\n');
+    }
+
+    // Flatten MCP result content blocks to a single string — the shape the loop
+    // feeds back into Nano's next prompt.
+    function contentToString(content) {
+      if (!Array.isArray(content)) {
+        return typeof content === 'string' ? content : JSON.stringify(content);
+      }
+      return content.map(function (block) {
+        if (block && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string') {
+          return block.text;
+        }
+        return JSON.stringify(block);
+      }).join('\n');
+    }
+
+    // =====================================================================
+    // Transports. Both expose one primitive — send(request) -> response —
+    // so the client code below is identical for mock and remote servers.
+    // =====================================================================
+
+    // --- Mock MCP server: answers JSON-RPC in-page. No network, no CORS. ---
+    const MOCK_TOOLS = [
+      { name: 'add', description: 'Add two numbers and return the sum.',
+        inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'] } },
+      { name: 'multiply', description: 'Multiply two numbers and return the product.',
+        inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'] } },
+      { name: 'echo', description: 'Echo back a message.',
+        inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } },
+    ];
+
+    function mockHandle(request) {
+      const id = request.id;
+      const method = request.method;
+      const params = request.params || {};
+      const ok = function (result) { return { jsonrpc: '2.0', id: id, result: result }; };
+
+      if (method === 'initialize') {
+        return ok({
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: {} },
+          serverInfo: { name: 'mock-mcp-server', version: '0.1.0' },
+        });
+      }
+      if (method === 'notifications/initialized') return null; // notification: no reply
+      if (method === 'tools/list') return ok({ tools: MOCK_TOOLS });
+      if (method === 'tools/call') {
+        const name = params.name;
+        const args = params.arguments || {};
+        if (name === 'add') {
+          return ok({ content: [{ type: 'text', text: 'The sum of ' + args.a + ' and ' + args.b + ' is ' + (Number(args.a) + Number(args.b)) + '.' }] });
+        }
+        if (name === 'multiply') {
+          return ok({ content: [{ type: 'text', text: 'The product of ' + args.a + ' and ' + args.b + ' is ' + (Number(args.a) * Number(args.b)) + '.' }] });
+        }
+        if (name === 'echo') {
+          return ok({ content: [{ type: 'text', text: 'Echo: ' + args.message }] });
+        }
+        return { jsonrpc: '2.0', id: id, result: { content: [{ type: 'text', text: 'Unknown tool: ' + name }], isError: true } };
+      }
+      return { jsonrpc: '2.0', id: id, error: { code: -32601, message: 'Method not found: ' + method } };
+    }
+
+    function makeMockTransport() {
+      return {
+        label: 'mock',
+        send: function (request) { return Promise.resolve(mockHandle(request)); },
+        close: function () {},
+      };
+    }
+
+    // --- Remote transport: raw JSON-RPC over Streamable HTTP via fetch. ---
+    function makeHttpTransport(opts) {
+      const endpoint = opts.proxyPrefix ? opts.proxyPrefix + opts.url : opts.url;
+      let sessionId = null;              // captured from the initialize response header
+      let protocolVersion = PROTOCOL_VERSION;
+
+      return {
+        label: 'http',
+        close: function () { sessionId = null; },
+        send: async function (request) {
+          const headers = {
+            'Content-Type': 'application/json',
+            // Streamable HTTP servers may answer with JSON or an SSE stream.
+            'Accept': 'application/json, text/event-stream',
+          };
+          if (sessionId) {
+            headers['Mcp-Session-Id'] = sessionId;
+            headers['Mcp-Protocol-Version'] = protocolVersion;
+          }
+          if (opts.token) headers['Authorization'] = 'Bearer ' + opts.token;
+
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(request),
+          });
+
+          // The session id rides back on the initialize response. Cross-origin,
+          // the server MUST list Mcp-Session-Id in Access-Control-Expose-Headers
+          // or the browser hides it and later requests fail with "missing session".
+          const sid = res.headers.get('Mcp-Session-Id');
+          if (sid) sessionId = sid;
+
+          if (!res.ok && res.status !== 202) {
+            const body = await res.text().catch(function () { return ''; });
+            throw new Error('HTTP ' + res.status + (body ? ': ' + body.slice(0, 200) : ''));
+          }
+
+          const msg = await readRpc(res);
+          if (msg && msg.error) throw new Error(msg.error.message || 'JSON-RPC error');
+          if (request.method === 'initialize' && msg && msg.result && msg.result.protocolVersion) {
+            protocolVersion = msg.result.protocolVersion; // honour the negotiated version
+          }
+          return msg;
+        },
+      };
+    }
+
+    // Read a JSON-RPC response that may arrive as JSON or as an SSE frame.
+    async function readRpc(res) {
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      const body = await res.text();
+      if (!body) return null; // 202 Accepted — a notification, no body
+      if (ct.indexOf('text/event-stream') !== -1) {
+        // SSE frame: pull the `data:` payload(s) and parse the JSON-RPC message.
+        const data = body.split(/\r?\n/)
+          .filter(function (l) { return l.indexOf('data:') === 0; })
+          .map(function (l) { return l.slice(5).trim(); })
+          .join('\n');
+        return data ? JSON.parse(data) : null;
+      }
+      return JSON.parse(body);
+    }
+
+    // =====================================================================
+    // MCP client methods — the same for every transport.
+    // =====================================================================
+
+    // A request carries an id and expects a result; a notification carries neither.
+    function rpc(t, method, params) {
+      return t.send({ jsonrpc: '2.0', id: ++rpcId, method: method, params: params });
+    }
+    function notify(t, method, params) {
+      return t.send({ jsonrpc: '2.0', method: method, params: params });
+    }
+
+    // initialize -> notifications/initialized -> tools/list.
+    async function connectTransport(t) {
+      const initRes = await rpc(t, 'initialize', {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: 'chrome-ai-course-mcp-client', version: '0.1.0' },
+      });
+      const info = (initRes && initRes.result) || {};
+      // The handshake isn't complete until the client sends this notification.
+      await notify(t, 'notifications/initialized', {});
+      const listRes = await rpc(t, 'tools/list', {});
+      const rawTools = (listRes && listRes.result && listRes.result.tools) || [];
+      const tools = rawTools.map(function (x) {
+        return {
+          name: x.name,
+          description: x.description || '',
+          inputSchema: x.inputSchema || { type: 'object' },
+        };
+      });
+      return {
+        serverName: (info.serverInfo && info.serverInfo.name) || 'unknown',
+        serverVersion: (info.serverInfo && info.serverInfo.version) || '',
+        capabilities: Object.keys(info.capabilities || {}),
+        tools: tools,
+      };
+    }
+
+    // tools/call -> flatten the content blocks to a string.
+    async function callTool(t, name, args) {
+      const res = await rpc(t, 'tools/call', { name: name, arguments: args });
+      const result = (res && res.result) || {};
+      return contentToString(result.content);
+    }
+
+    // =====================================================================
+    // Session lifecycle: outputLanguage:'en' + a download monitor. Recreated
+    // when the tool set changes (the system prompt embeds the tool list).
+    // =====================================================================
+    async function getAgentSession(tools) {
+      const key = tools.map(function (t) { return t.name; }).slice().sort().join(',');
+      if (agentSession && key === agentToolsKey) return agentSession;
+      if (agentSession) { agentSession.destroy(); agentSession = null; }
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      agentSession = await LanguageModel.create({
+        outputLanguage: 'en',            // load-bearing — omit it and JSON degrades
+        responseFormat: INTENT_SCHEMA,   // constrain output to the intent shape
+        initialPrompts: [{ role: 'system', content: buildSystemPrompt(tools) }],
+        monitor: function (m) {
+          m.addEventListener('downloadprogress', function (e) {
+            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+      dlEl.hidden = true;
+      agentToolsKey = key;
+      return agentSession;
+    }
+
+    // =====================================================================
+    // UI wiring.
+    // =====================================================================
+    function currentMode() {
+      const checked = document.querySelector('input[name=mode]:checked');
+      return checked ? checked.value : 'mock';
+    }
+
+    function syncModeFields() {
+      remoteFields.hidden = currentMode() !== 'remote';
+    }
+
+    async function teardown() {
+      if (agentSession) { agentSession.destroy(); agentSession = null; agentToolsKey = ''; }
+      if (transport) { transport.close(); transport = null; }
+      connection = null;
+    }
+
+    function renderConnection(conn) {
+      connEl.textContent = '';
+      const head = document.createElement('div');
+      head.className = 'kv';
+      const b = document.createElement('b');
+      b.textContent = 'server: ';
+      head.appendChild(b);
+      head.appendChild(document.createTextNode(
+        conn.serverName + (conn.serverVersion ? ' v' + conn.serverVersion : '') +
+        '  ·  capabilities: ' + (conn.capabilities.join(', ') || 'none') +
+        '  ·  ' + conn.tools.length + ' tool(s)'
+      ));
+      connEl.appendChild(head);
+      conn.tools.forEach(function (t) {
+        const row = document.createElement('div');
+        row.className = 'tool';
+        const name = document.createElement('b');
+        name.textContent = t.name;
+        row.appendChild(name);
+        row.appendChild(document.createTextNode(
+          (t.description ? ' — ' + t.description : '') + '  ' + renderSchemaProperties(t.inputSchema)
+        ));
+        connEl.appendChild(row);
+      });
+    }
+
+    function setAgentNote(html, kind) {
+      agentNote.innerHTML = html || '';
+      agentNote.className = (html ? 'status ' + (kind || '') : 'muted');
+    }
+
+    async function handleConnect() {
+      if (busy) return;
+      busy = true;
+      connectBtn.disabled = true;
+      const mode = currentMode();
+      await teardown();
+      connEl.className = 'output';
+      connEl.textContent = '';
+      runBtn.disabled = true;
+      setStatus(mode === 'remote' ? 'Connecting to the remote server…' : 'Connecting to the mock server…', 'warn');
+      try {
+        const t = mode === 'remote'
+          ? makeHttpTransport({ url: urlEl.value.trim(), token: tokenEl.value, proxyPrefix: proxyEl.value.trim() })
+          : makeMockTransport();
+        const conn = await connectTransport(t);
+        transport = t;
+        connection = conn;
+        renderConnection(conn);
+        disconnectBtn.disabled = false;
+        setStatus('Connected to ' + escapeHtml(conn.serverName) + '. ' + conn.tools.length + ' tool(s) discovered.', 'ok');
+        if (nanoReady) {
+          runBtn.disabled = false;
+          setAgentNote('', '');
+        }
+      } catch (e) {
+        connEl.className = 'output';
+        let hint = '';
+        if (mode === 'remote') {
+          hint = ' Browser → remote MCP is CORS-gated: the server must allow this origin and expose ' +
+            '<code>Mcp-Session-Id</code>. Try the mock server, or run a CORS proxy and use the prefix field.';
+        }
+        connEl.innerHTML = '<span style="color:#d44">Connect failed: ' + escapeHtml(errMessage(e)) + '</span>' + hint;
+        setStatus('Connect failed.', 'err');
+      } finally {
+        busy = false;
+        connectBtn.disabled = false;
+      }
+    }
+
+    async function handleDisconnect() {
+      if (busy) return;
+      await teardown();
+      connEl.textContent = '';
+      connEl.className = 'output';
+      disconnectBtn.disabled = true;
+      runBtn.disabled = true;
+      logEl.textContent = '';
+      replyEl.textContent = '';
+      setStatus('Disconnected.', 'warn');
+    }
+
+    function logStep(n, toolName, args, result) {
+      const row = document.createElement('div');
+      row.className = 'step';
+      row.textContent = '#' + n + '  ' + toolName + '(' + JSON.stringify(args) + ')  →  ' + result;
+      logEl.appendChild(row);
+    }
+
+    // The intent loop: prompt -> parse -> tools/call -> feed result -> repeat.
+    async function runAgent() {
+      if (!transport || !connection) { setStatus('Connect to a server first.', 'warn'); return; }
+      const question = questionEl.value.trim();
+      if (!question || busy) return;
+      busy = true;
+      runBtn.disabled = true;
+      logEl.textContent = '';
+      replyEl.textContent = '';
+      setStatus('Thinking…', 'warn');
+      try {
+        const session = await getAgentSession(connection.tools);
+        let promptText = question;
+        let finished = false;
+
+        for (let i = 0; i < MAX_TOOL_CALLS; i++) {
+          const raw = await session.prompt(promptText);
+          const parsed = extractJsonFromResponse(raw);
+
+          if (!parsed || typeof parsed.toolName !== 'string') {
+            replyEl.textContent = raw;
+            finished = true;
+            break;
+          }
+
+          if (parsed.toolName === 'done') {
+            replyEl.textContent = (typeof parsed.reply === 'string' && parsed.reply) ? parsed.reply : '(done)';
+            finished = true;
+            break;
+          }
+
+          // Only dispatch a tool the server actually advertised.
+          const tool = connection.tools.find(function (t) { return t.name === parsed.toolName; });
+          if (!tool) {
+            promptText = 'Tool "' + parsed.toolName + '" is not available. Valid tool names: ' +
+              (connection.tools.map(function (t) { return t.name; }).join(', ') || '(none)') +
+              '. Call a valid tool or emit {"toolName":"done","reply":"..."}.';
+            continue;
+          }
+
+          const args = coerceArgs(parsed.args);
+          let result;
+          try {
+            result = await callTool(transport, parsed.toolName, args);
+          } catch (e) {
+            result = JSON.stringify({ error: errMessage(e) });
+          }
+          logStep(i + 1, parsed.toolName, args, result);
+
+          // Feed the result back so the model can continue or finish.
+          promptText = 'Tool "' + parsed.toolName + '" result: ' + result +
+            '. Now call the next tool (emit the JSON), or if the request is complete emit ' +
+            '{"toolName":"done","reply":"..."}.';
+        }
+
+        if (!finished) {
+          replyEl.textContent = 'Stopped after ' + MAX_TOOL_CALLS + ' tool calls without a final reply.';
+        }
+        setStatus('Done.', 'ok');
+      } catch (e) {
+        replyEl.textContent = 'Error: ' + errMessage(e);
+        setStatus('Error: ' + errName(e) + '.', 'err');
+      } finally {
+        busy = false;
+        runBtn.disabled = false;
+      }
+    }
+
+    // Feature-detect + availability() gate. Connecting and listing tools work
+    // WITHOUT Nano — only the agent step needs the Prompt API, so it's gated
+    // separately here, not on the whole page.
+    async function initNano() {
+      connectBtn.disabled = false; // connect works regardless of Nano
+      if (typeof LanguageModel === 'undefined') {
+        nanoReady = false;
+        setStatus('Ready to connect. This browser has no built-in <code>LanguageModel</code>, so the agent step is disabled — connection and tool discovery still work.', 'warn');
+        setAgentNote('No built-in <code>LanguageModel</code> here. Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.', 'err');
+        return;
+      }
+      let status;
+      try {
+        status = await LanguageModel.availability();
+      } catch (e) {
+        nanoReady = false;
+        setStatus('Ready to connect. <code>availability()</code> threw, so the agent step is disabled.', 'warn');
+        setAgentNote('Built-in AI is unavailable. See <a href="' + SETUP_URL + '">Setup &amp; availability</a>, or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.', 'err');
+        return;
+      }
+      if (status === 'unavailable') {
+        nanoReady = false;
+        setStatus('Ready to connect. Built-in AI reports <code>unavailable</code>, so the agent step is disabled.', 'warn');
+        setAgentNote('Built-in AI reports <code>unavailable</code> on this device. See <a href="' + SETUP_URL + '">Setup &amp; availability</a>, or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.', 'err');
+        return;
+      }
+      nanoReady = true;
+      if (status === 'available') {
+        setStatus('Ready. Connect to the mock server, then ask a question.', 'ok');
+      } else {
+        setStatus('Ready. The model needs a one-time download (a few GB) on your first Ask.', 'warn');
+      }
+    }
+
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=mode]'), function (r) {
+      r.addEventListener('change', syncModeFields);
+    });
+    connectBtn.addEventListener('click', function () { void handleConnect(); });
+    disconnectBtn.addEventListener('click', function () { void handleDisconnect(); });
+    runBtn.addEventListener('click', function () { void runAgent(); });
+
+    // Free GPU memory on teardown.
+    window.addEventListener('beforeunload', function () {
+      if (agentSession) agentSession.destroy();
+    });
+
+    syncModeFields();
+    void initNano();
+  </script>
+</body>
+</html>
