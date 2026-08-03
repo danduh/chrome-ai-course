@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Embeddings (SemanticEmbedder) — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text] { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; background: transparent; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    .row { display: flex; align-items: baseline; gap: .6rem; padding: .5rem .6rem;
+      border: 1px solid #8883; border-radius: .5rem; margin: .4rem 0; }
+    .row.top { border-color: #2a7; background: #2a71; }
+    .rank { font-variant-numeric: tabular-nums; opacity: .7; min-width: 1.2em; }
+    .score { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 3.2em; }
+    .doc { flex: 1; }
+    .hint { font-size: .85rem; opacity: .8; margin: .5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Embeddings — on-device semantic search</h1>
+  <p>Rank text by meaning with Chrome's built-in <code>SemanticEmbedder</code>
+    (<code>embeddinggemma-300m</code>), running on-device. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/embeddings">Embeddings (SemanticEmbedder)</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="prep" hidden></progress>
+
+  <div class="field">
+    <label for="docs">Documents — one per line</label>
+    <textarea id="docs" rows="7">Our refund window is 30 days from the purchase date.
+Reset your password from the account settings page.
+The app supports dark mode on desktop and mobile.
+Two-factor authentication codes come from your phone.
+Export your data as CSV from the reports screen.
+Standard shipping takes three to five business days.</textarea>
+  </div>
+
+  <div class="field">
+    <label for="query">Query</label>
+    <input type="text" id="query" value="how long do I have to return something?" />
+  </div>
+
+  <div class="actions">
+    <button id="run" disabled>Embed &amp; search</button>
+  </div>
+
+  <p class="hint">Documents are embedded with <code>taskType: 'retrieval-document'</code>,
+    the query with <code>'retrieval-query'</code>, then ranked by cosine similarity in plain JS.</p>
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `SemanticEmbedder` global.
+    // SemanticEmbedder is a bare global (like LanguageModel), NOT window.ai.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/embeddings';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/embeddings';
+
+    // taskType lives on embed(), NOT create(). create() takes no arguments.
+    const DOC_TASK = 'retrieval-document';
+    const QUERY_TASK = 'retrieval-query';
+
+    const statusEl = document.getElementById('status');
+    const prepEl = document.getElementById('prep');
+    const docsEl = document.getElementById('docs');
+    const queryEl = document.getElementById('query');
+    const runBtn = document.getElementById('run');
+    const outputEl = document.getElementById('output');
+
+    let embedder = null;
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' This is an Early Preview API — enable <code>#semantic-embedder-api</code> in ' +
+          'Chrome 152+ Canary. Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      runBtn.disabled = true;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    // Cosine similarity: dot(a, b) / (‖a‖ · ‖b‖). Returns a value in [-1, 1].
+    function cosineSimilarity(a, b) {
+      if (a.length !== b.length) throw new Error('length mismatch');
+      let dot = 0, normA = 0, normB = 0;
+      for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+      }
+      const denom = Math.sqrt(normA) * Math.sqrt(normB);
+      return denom === 0 ? 0 : dot / denom;
+    }
+
+    // No downloadprogress event exists for SemanticEmbedder yet, and create() throws
+    // if the model isn't ready — so poll availability() until 'available', then create().
+    async function waitUntilAvailable() {
+      const timeoutMs = 5 * 60 * 1000;
+      const start = Date.now();
+      let state = await SemanticEmbedder.availability();
+      while (state !== 'available') {
+        if (state === 'unavailable') {
+          throw new Error('SemanticEmbedder is not available on this device.');
+        }
+        if (Date.now() - start > timeoutMs) {
+          throw new Error('The embedding model is still preparing — try again shortly.');
+        }
+        prepEl.hidden = false; // indeterminate bar (no percentage available)
+        setStatus('Preparing the on-device model (first-run download can take a minute)…', 'warn');
+        await new Promise((r) => setTimeout(r, 1500));
+        state = await SemanticEmbedder.availability();
+      }
+      prepEl.hidden = true;
+    }
+
+    // Feature-detect + availability() gate before anything else.
+    async function init() {
+      if (typeof SemanticEmbedder === 'undefined') {
+        degrade('This browser has no built-in <code>SemanticEmbedder</code>.');
+        return;
+      }
+
+      let status;
+      try {
+        status = await SemanticEmbedder.availability();
+      } catch (e) {
+        degrade('<code>availability()</code> threw: ' + (e && e.message ? e.message : e) + '.');
+        return;
+      }
+
+      if (status === 'unavailable') {
+        degrade('Built-in embeddings report <code>unavailable</code> on this browser.');
+        return;
+      }
+
+      if (status === 'available') {
+        setStatus('Model ready. Edit the documents or query and hit Embed &amp; search.', 'ok');
+      } else {
+        setStatus('Model needs a one-time download (~200 MB). It starts on your first search.', 'warn');
+      }
+      runBtn.disabled = false;
+    }
+
+    function render(ranked) {
+      if (ranked.length === 0) {
+        outputEl.textContent = 'No documents to rank. Add a line or two above.';
+        return;
+      }
+      outputEl.innerHTML = ranked
+        .map((row, i) =>
+          '<div class="row' + (i === 0 ? ' top' : '') + '">' +
+            '<span class="rank">' + (i + 1) + '</span>' +
+            '<span class="score">' + row.score.toFixed(3) + '</span>' +
+            '<span class="doc">' + escapeHtml(row.text) + '</span>' +
+          '</div>'
+        )
+        .join('');
+    }
+
+    async function run() {
+      const documents = docsEl.value.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+      const query = queryEl.value.trim();
+      if (busy) return;
+      if (documents.length === 0) { setStatus('Add at least one document line.', 'warn'); return; }
+      if (!query) { setStatus('Type a query to rank against.', 'warn'); return; }
+
+      busy = true;
+      runBtn.disabled = true;
+      outputEl.textContent = '';
+
+      try {
+        // Poll until the model is ready, THEN create() (no arguments) — see waitUntilAvailable.
+        await waitUntilAvailable();
+        // One embedder for the whole run; destroyed in finally.
+        embedder = await SemanticEmbedder.create();
+
+        setStatus('Embedding ' + documents.length + ' documents and the query…', 'warn');
+
+        // Batch the corpus (retrieval-document); results are positional.
+        const docRes = await embedder.embed(documents, { taskType: DOC_TASK });
+        // The user's query (retrieval-query) — the asymmetric pair beats matching sides.
+        const queryRes = await embedder.embed(query, { taskType: QUERY_TASK });
+        const queryVec = queryRes.embeddings[0].values;
+
+        const ranked = documents
+          .map((text, i) => ({
+            text,
+            score: cosineSimilarity(queryVec, docRes.embeddings[i].values),
+          }))
+          .sort((a, b) => b.score - a.score);
+
+        render(ranked);
+        setStatus('Ranked ' + documents.length + ' documents by cosine similarity. Edit and run again.', 'ok');
+      } catch (e) {
+        const name = e && e.name ? e.name : 'Error';
+        if (name === 'QuotaExceededError') {
+          outputEl.textContent =
+            'An input is over the model quota (QuotaExceededError). Shorten the longest line and retry.';
+        } else if (name === 'NotSupportedError') {
+          outputEl.textContent =
+            'That input or option is not supported in this build (NotSupportedError).';
+        } else {
+          outputEl.textContent = 'Error: ' + (e && e.message ? e.message : name);
+        }
+        setStatus('Error: ' + name + '.', 'err');
+      } finally {
+        // Free the model even if embed() threw. create() per run keeps the lifecycle obvious;
+        // in production you can hold ONE embedder and reuse it across searches instead.
+        if (embedder) { embedder.destroy(); embedder = null; }
+        prepEl.hidden = true;
+        busy = false;
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener('click', run);
+
+    // Free the model on teardown so a closed tab doesn't strand a session.
+    window.addEventListener('beforeunload', () => {
+      if (embedder) embedder.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>

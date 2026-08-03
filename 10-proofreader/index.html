@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Proofreader API — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1rem; margin: 0 0 .35rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text], select { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; background: transparent; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: end; }
+    .row .col { flex: 1 1 8rem; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    .note { padding: .5rem .75rem; border-radius: .5rem; border: 1px dashed #8887;
+      margin: 1rem 0; font-size: .9rem; }
+    .block { margin: 1rem 0; }
+    .diff { white-space: pre-wrap; }
+    del { color: #d44; text-decoration: line-through; opacity: .8; }
+    ins { color: #2a7; text-decoration: none; font-weight: 600; }
+    ul.list { margin: 0; padding-left: 1.25rem; }
+    ul.list li { margin: .25rem 0; }
+    ul.list code { font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <h1>The Proofreader API — on-device corrections</h1>
+  <p>Fix grammar, spelling, and punctuation with Chrome's built-in
+    <code>Proofreader</code> (Gemini Nano), running on-device. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/proofreader">The Proofreader API</a>.</p>
+
+  <div class="note">Heads up: the Proofreader API is still behind a Chrome flag
+    and off by default, so on most machines it reports <code>unavailable</code>.
+    Enable <code>#proofreader-api</code> in <code>chrome://flags</code>, then
+    restart Chrome. If it's off, the status line below tells you.</div>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <div class="field">
+    <label for="source">Text to proofread</label>
+    <textarea id="source" rows="4">i think there going to a meetting tommorow at the office. there progress have been great on the project, but we havent recieved the final specs yet</textarea>
+  </div>
+
+  <div class="field row">
+    <div class="col">
+      <label for="lang">expectedInputLanguages</label>
+      <select id="lang">
+        <option value="en" selected>en — English</option>
+        <option value="es">es — Spanish</option>
+        <option value="ja">ja — Japanese</option>
+        <option value="de">de — German</option>
+        <option value="fr">fr — French</option>
+      </select>
+    </div>
+    <div class="col actions">
+      <button id="run" disabled>Proofread</button>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2>Corrected text</h2>
+    <div id="corrected" class="output" aria-live="polite"></div>
+  </div>
+
+  <div class="block">
+    <h2>Inline diff</h2>
+    <div id="diff" class="output diff" aria-live="polite"></div>
+  </div>
+
+  <div class="block">
+    <h2>Corrections</h2>
+    <ul id="list" class="list" aria-live="polite"></ul>
+  </div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `Proofreader` global.
+    // Proofreader is flag-gated (a lapsed origin trial), so availability() is
+    // usually "unavailable" until the user enables chrome://flags/#proofreader-api.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/proofreader';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/proofreader';
+    const FLAG = '#proofreader-api';
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const sourceEl = document.getElementById('source');
+    const langEl = document.getElementById('lang');
+    const runBtn = document.getElementById('run');
+    const correctedEl = document.getElementById('corrected');
+    const diffEl = document.getElementById('diff');
+    const listEl = document.getElementById('list');
+
+    // One session, cached by the language it was created for.
+    let proofreader = null;
+    let proofreaderLang = null;
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function errName(e) { return e && e.name ? e.name : 'Error'; }
+    function errMessage(e) { return e && e.message ? e.message : String(e); }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function clearOutput() {
+      correctedEl.textContent = '';
+      diffEl.innerHTML = '';
+      listEl.innerHTML = '';
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Enable <code>' + FLAG + '</code> in <code>chrome://flags</code> ' +
+          '(see <a href="' + SETUP_URL + '">Setup &amp; availability</a>), ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      runBtn.disabled = true;
+    }
+
+    // Feature-detect + availability() gate before anything else.
+    async function init() {
+      if (typeof Proofreader === 'undefined') {
+        degrade('This browser has no built-in <code>Proofreader</code>.');
+        return;
+      }
+
+      let status;
+      try {
+        status = await Proofreader.availability({ expectedInputLanguages: [langEl.value] });
+      } catch (e) {
+        degrade('<code>availability()</code> threw: ' + errMessage(e) + '.');
+        return;
+      }
+
+      if (status === 'unavailable') {
+        degrade('<code>Proofreader</code> reports <code>unavailable</code> — usually the flag is off.');
+        return;
+      }
+
+      if (status === 'available') {
+        setStatus('Model ready. Edit the text and hit Proofread.', 'ok');
+      } else {
+        setStatus('Model needs a one-time adapter download (a few GB). It starts on your first proofread.', 'warn');
+      }
+      runBtn.disabled = false;
+    }
+
+    // Reuse a cached session for the current language, or create a fresh one
+    // with a download monitor. One session per language — don't leak.
+    async function ensureSession() {
+      const lang = langEl.value;
+      if (proofreader && proofreaderLang === lang) return proofreader;
+      if (proofreader) { proofreader.destroy(); proofreader = null; proofreaderLang = null; }
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      setStatus('Preparing the model…', 'warn');
+
+      const created = await Proofreader.create({
+        expectedInputLanguages: [lang],       // 'en' | 'es' | 'ja' | 'de' | 'fr'
+        includeCorrectionTypes: true,         // fill each correction's `types` array
+        includeCorrectionExplanations: true,  // add a human-readable `explanation`
+        correctionExplanationLanguage: 'en',  // explanation language, independent of the input
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            setStatus('Downloading adapter… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+
+      dlEl.hidden = true;
+      proofreader = created;
+      proofreaderLang = lang;
+      return created;
+    }
+
+    // Walk the input once: unchanged spans, removed (original slice), inserted (correction).
+    // Mirrors the shipped diffSegments walk — sort by startIndex, then interleave.
+    function buildSegments(input, corrections) {
+      if (!corrections.length) return [{ kind: 'unchanged', text: input }];
+      const sorted = [...corrections].sort((a, b) => a.startIndex - b.startIndex);
+      const segments = [];
+      let cursor = 0;
+      for (const c of sorted) {
+        if (cursor < c.startIndex) {
+          segments.push({ kind: 'unchanged', text: input.slice(cursor, c.startIndex) });
+        }
+        segments.push({ kind: 'removed', text: input.slice(c.startIndex, c.endIndex) });
+        segments.push({ kind: 'inserted', text: c.correction });
+        cursor = c.endIndex;
+      }
+      if (cursor < input.length) {
+        segments.push({ kind: 'unchanged', text: input.slice(cursor) });
+      }
+      return segments;
+    }
+
+    // Render the diff as struck-through original + highlighted correction, inline.
+    function renderDiff(input, corrections) {
+      const segs = buildSegments(input, corrections);
+      diffEl.innerHTML = segs.map((s) => {
+        const t = escapeHtml(s.text);
+        if (s.kind === 'unchanged') return '<span>' + t + '</span>';
+        if (s.kind === 'removed') return s.text ? '<del>' + t + '</del>' : '';
+        return s.text ? '<ins>' + t + '</ins>' : '';
+      }).join('');
+    }
+
+    // Render each correction: original slice (by index), the suggestion, its types, and explanation.
+    function renderList(input, corrections) {
+      if (!corrections.length) {
+        listEl.innerHTML = '<li>No corrections — the text is clean.</li>';
+        return;
+      }
+      listEl.innerHTML = corrections.map((c) => {
+        const original = escapeHtml(input.slice(c.startIndex, c.endIndex));
+        const correction = escapeHtml(c.correction);
+        const types = (c.types && c.types.length)
+          ? ' ' + c.types.map((t) => '<code>' + escapeHtml(t) + '</code>').join(' ')
+          : '';
+        const explanation = c.explanation ? ' — ' + escapeHtml(c.explanation) : '';
+        return '<li>changed &ldquo;<del>' + original + '</del>&rdquo; &rarr; ' +
+          '&ldquo;<ins>' + correction + '</ins>&rdquo;' + types + explanation + '</li>';
+      }).join('');
+    }
+
+    async function run() {
+      const input = sourceEl.value;
+      if (!input.trim() || busy) return;
+
+      busy = true;
+      runBtn.disabled = true;
+      clearOutput();
+
+      try {
+        const pr = await ensureSession();
+
+        setStatus('Proofreading…', 'warn');
+        // Indices come back as offsets into `input` — slice originals from it, not correctedInput.
+        const result = await pr.proofread(input);
+
+        correctedEl.textContent = result.correctedInput;
+        renderDiff(input, result.corrections);
+        renderList(input, result.corrections);
+
+        const n = result.corrections.length;
+        setStatus(
+          n
+            ? 'Done — ' + n + ' correction' + (n === 1 ? '' : 's') + '. Edit the text and run it again.'
+            : 'Done — no corrections found.',
+          'ok'
+        );
+      } catch (e) {
+        const name = errName(e);
+        if (name === 'QuotaExceededError') {
+          correctedEl.textContent =
+            'Input is over the model quota (QuotaExceededError). Trim the text and try again.';
+        } else if (name === 'NotSupportedError') {
+          correctedEl.textContent =
+            'That language is not supported (NotSupportedError). Pick en, es, ja, de, or fr.';
+        } else if (name === 'InvalidStateError') {
+          correctedEl.textContent = 'That session was destroyed. Run again to recreate it.';
+          proofreader = null;
+          proofreaderLang = null;
+        } else if (name === 'AbortError') {
+          correctedEl.textContent = 'Proofreading was aborted.';
+        } else {
+          correctedEl.textContent = 'Error: ' + errMessage(e);
+        }
+        setStatus('Error: ' + name + '.', 'err');
+      } finally {
+        busy = false;
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener('click', run);
+
+    // Switching language invalidates the cached session — drop it and re-check.
+    langEl.addEventListener('change', () => {
+      if (proofreader) { proofreader.destroy(); proofreader = null; proofreaderLang = null; }
+      clearOutput();
+      runBtn.disabled = true;
+      init();
+    });
+
+    // Free GPU memory on teardown.
+    window.addEventListener('beforeunload', () => {
+      if (proofreader) proofreader.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>
