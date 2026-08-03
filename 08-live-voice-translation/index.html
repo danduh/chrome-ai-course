@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live voice translation — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: .04em;
+      opacity: .7; margin: 1.25rem 0 .4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.live { border-color: #d44; }
+    textarea, input[type=text], select { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    .output .line { padding: .1rem 0; }
+    .output .interim { opacity: .5; font-style: italic; }
+    .output .placeholder { opacity: .5; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; margin: .75rem 0; }
+    .row .col { flex: 1 1 12rem; }
+    .actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin: .75rem 0; }
+    .actions label { display: inline-flex; align-items: center; gap: .4rem; margin: 0; }
+    .note { font-size: .85rem; opacity: .8; border-left: 3px solid #c93; padding: .1rem .75rem; }
+  </style>
+</head>
+<body>
+  <h1>Live voice translation</h1>
+  <p>Speak, and Chrome transcribes with the Web Speech API and translates on-device
+    with <code>Translator</code>. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/live-voice-translation">Live voice translation</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <div class="row">
+    <div class="col">
+      <label for="speechLang">I'll speak in (BCP-47)</label>
+      <select id="speechLang"></select>
+    </div>
+    <div class="col">
+      <label for="targetLang">Translate to</label>
+      <select id="targetLang"></select>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="toggle" disabled>Start listening</button>
+    <label><input type="checkbox" id="speak" /> Speak translation</label>
+  </div>
+
+  <p class="note">Heads up: the translation runs on-device, but Chrome's speech
+    recognition sends your microphone audio to a server to transcribe it. The audio
+    leaves the machine; the translation doesn't.</p>
+
+  <h2>Transcript</h2>
+  <div id="transcript" class="output" aria-live="polite"></div>
+
+  <h2>Translation</h2>
+  <div id="translation" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Composes two raw browser globals:
+    //   window.SpeechRecognition / webkitSpeechRecognition  (Web Speech API, cloud STT)
+    //   Translator                                          (on-device, stable since Chrome 138)
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/live-voice-translation';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/live-translate';
+
+    // Web Speech wants BCP-47 (region and all); the short prefix before the '-'
+    // doubles as the Translator source language.
+    const SPEECH_LANGS = [
+      { code: 'en-US', name: 'English (US)' },
+      { code: 'en-GB', name: 'English (UK)' },
+      { code: 'es-ES', name: 'Spanish' },
+      { code: 'fr-FR', name: 'French' },
+      { code: 'de-DE', name: 'German' },
+      { code: 'uk-UA', name: 'Ukrainian' },
+      { code: 'ru-RU', name: 'Russian' },
+      { code: 'ja-JP', name: 'Japanese' },
+      { code: 'he-IL', name: 'Hebrew' },
+      { code: 'ar-SA', name: 'Arabic' },
+    ];
+    // Short ISO codes — what the Translator expects for source and target.
+    const TARGET_LANGS = [
+      { code: 'en', name: 'English' },
+      { code: 'es', name: 'Spanish' },
+      { code: 'fr', name: 'French' },
+      { code: 'de', name: 'German' },
+      { code: 'uk', name: 'Ukrainian' },
+      { code: 'ru', name: 'Russian' },
+      { code: 'ja', name: 'Japanese' },
+      { code: 'he', name: 'Hebrew' },
+      { code: 'ar', name: 'Arabic' },
+    ];
+    const INTERIM_DEBOUNCE_MS = 300;
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const speechLangEl = document.getElementById('speechLang');
+    const targetLangEl = document.getElementById('targetLang');
+    const toggleBtn = document.getElementById('toggle');
+    const speakEl = document.getElementById('speak');
+    const transcriptEl = document.getElementById('transcript');
+    const translationEl = document.getElementById('translation');
+
+    const SpeechRecognitionCtor =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    let recognition = null;   // current SpeechRecognition instance
+    let listening = false;
+
+    let translator = null;    // current Translator, cached per pair
+    let translatorKey = '';   // 'src->tgt' the current translator is built for
+
+    // Source transcript (append-only finals) + the live interim guess.
+    const finals = [];
+    let interimText = '';
+
+    // Translated output (append-only) + the live interim translation preview.
+    const translations = [];
+    let interimTranslation = '';
+
+    // Interim-translation debounce + cancellation.
+    let interimTimer = null;
+    let interimController = null;
+    let interimReqId = 0;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      toggleBtn.disabled = true;
+      speechLangEl.disabled = true;
+      targetLangEl.disabled = true;
+      speakEl.disabled = true;
+    }
+
+    function langName(code) {
+      try {
+        return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+      } catch {
+        return code;
+      }
+    }
+
+    function populateSelect(sel, langs, def) {
+      sel.innerHTML = langs
+        .map((l) => '<option value="' + l.code + '"' + (l.code === def ? ' selected' : '') + '>' + l.name + '</option>')
+        .join('');
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // SpeechRecognition speaks BCP-47 ('en-US'); Translator wants the short code ('en').
+    function toTranslatorLang(speechLang) {
+      return speechLang.split('-')[0];
+    }
+
+    function sourceLang() { return toTranslatorLang(speechLangEl.value); }
+    function targetLang() { return targetLangEl.value; }
+
+    function renderTranscript() {
+      const lines = finals.map((s) => '<div class="line">' + escapeHtml(s) + '</div>');
+      if (interimText) lines.push('<div class="line interim">' + escapeHtml(interimText) + '</div>');
+      transcriptEl.innerHTML = lines.length
+        ? lines.join('')
+        : '<span class="placeholder">Your words appear here as you speak.</span>';
+    }
+
+    function renderTranslation() {
+      const lines = translations.map((s) => '<div class="line">' + escapeHtml(s) + '</div>');
+      if (interimTranslation) lines.push('<div class="line interim">' + escapeHtml(interimTranslation) + '</div>');
+      translationEl.innerHTML = lines.length
+        ? lines.join('')
+        : '<span class="placeholder">Translations appear here, one per finalized sentence.</span>';
+    }
+
+    // Probe the pair, then create (and cache) a translator for it. A different
+    // pair means a different pack — destroy the old instance and build a new one.
+    async function ensureTranslator(src, tgt) {
+      const key = src + '->' + tgt;
+      if (translator && translatorKey === key) return translator;
+      if (translator) {
+        translator.destroy();
+        translator = null;
+        translatorKey = '';
+      }
+
+      const status = await Translator.availability({ sourceLanguage: src, targetLanguage: tgt });
+      if (status === 'unavailable') {
+        throw new DOMException('No language pack for ' + src + ' → ' + tgt + '.', 'NotSupportedError');
+      }
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      translator = await Translator.create({
+        sourceLanguage: src,
+        targetLanguage: tgt,
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction — the language pack download
+            setStatus('Downloading the ' + src + '→' + tgt + ' pack… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+      translatorKey = key;
+      dlEl.hidden = true;
+      return translator;
+    }
+
+    async function translateOne(text, options) {
+      const src = sourceLang();
+      const tgt = targetLang();
+      if (src === tgt) return text; // passthrough — nothing to translate
+      const t = await ensureTranslator(src, tgt);
+      return t.translate(text, options);
+    }
+
+    function speak(text) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = targetLang();
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+    }
+
+    // A finalized sentence: commit it, translate it on-device, append the result.
+    async function handleFinal(sentence) {
+      finals.push(sentence);
+      interimText = '';
+      renderTranscript();
+
+      // A final supersedes the interim preview — cancel it.
+      interimController?.abort();
+      interimController = null;
+      interimTranslation = '';
+      if (interimTimer !== null) { clearTimeout(interimTimer); interimTimer = null; }
+
+      try {
+        const output = await translateOne(sentence);
+        if (output && output.trim()) {
+          translations.push(output);
+          renderTranslation();
+          if (speakEl.checked) speak(output);
+        }
+        setStatus('Translation ran on-device. Transcription went through a server.', 'ok');
+      } catch (e) {
+        if (e.name === 'NotSupportedError') {
+          setStatus('That language pair is unavailable on this device. Pick another target.', 'err');
+        } else if (e.name !== 'AbortError') {
+          setStatus('Translation error: ' + (e.message || e.name) + '.', 'err');
+        }
+      }
+    }
+
+    // A rolling interim: show it muted, and debounce-translate it into a preview,
+    // cancelling any older in-flight translation so previews can't land out of order.
+    function handleInterim(text) {
+      interimText = text;
+      renderTranscript();
+
+      if (interimTimer !== null) clearTimeout(interimTimer);
+      interimTimer = setTimeout(async () => {
+        const myId = ++interimReqId;
+        interimController?.abort();
+        interimController = new AbortController();
+        try {
+          const preview = await translateOne(text, { signal: interimController.signal });
+          if (myId !== interimReqId) return;        // a newer interim superseded us
+          if (preview && preview.trim()) {
+            interimTranslation = preview;
+            renderTranslation();
+          }
+        } catch (e) {
+          if (e.name !== 'AbortError') { /* transient — the next interim recovers */ }
+        }
+      }, INTERIM_DEBOUNCE_MS);
+    }
+
+    function startListening() {
+      const recog = new SpeechRecognitionCtor();
+      recog.continuous = true;       // keep listening across pauses
+      recog.interimResults = true;   // emit partial guesses while speaking
+      recog.lang = speechLangEl.value;
+
+      recog.onresult = (event) => {
+        let interim = '';
+        // Start at resultIndex — everything before it is already committed.
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const transcript = result[0].transcript;
+          if (result.isFinal) {
+            const trimmed = transcript.trim();
+            if (trimmed) handleFinal(trimmed);
+          } else {
+            interim += transcript;
+          }
+        }
+        if (interim.trim()) handleInterim(interim);
+      };
+
+      recog.onerror = (event) => {
+        if (event.error === 'not-allowed') {
+          setStatus('Microphone blocked — allow it in the address bar, then Start again.', 'err');
+        } else if (event.error === 'network') {
+          // The transcription hop is a server call — no connection, no transcript.
+          setStatus('Speech recognition needs a network connection on this platform.', 'err');
+        } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          setStatus('Speech error: ' + (event.error || event.message) + '.', 'err');
+        }
+      };
+
+      recog.onend = () => {
+        listening = false;
+        interimText = '';
+        renderTranscript();
+        toggleBtn.textContent = 'Start listening';
+        toggleBtn.classList.remove('live');
+      };
+
+      recognition = recog;
+      try {
+        recog.start(); // needs a user gesture + mic permission + secure context
+        listening = true;
+        toggleBtn.textContent = 'Stop';
+        toggleBtn.classList.add('live');
+        setStatus('Listening… speak into the mic. Translations land on-device.', 'warn');
+      } catch (e) {
+        setStatus('Could not start recognition: ' + (e.message || e.name) + '.', 'err');
+        listening = false;
+      }
+    }
+
+    function stopListening() {
+      try { recognition?.stop(); } catch { /* idempotent */ }
+    }
+
+    function teardown() {
+      stopListening();
+      interimController?.abort();
+      if (translator) { translator.destroy(); translator = null; translatorKey = ''; }
+      speechSynthesis.cancel();
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      if (listening) stopListening();
+      else startListening();
+    });
+
+    // Changing the spoken language mid-session: restart the recognizer with it.
+    speechLangEl.addEventListener('change', () => {
+      if (!listening) return;
+      stopListening();
+      setTimeout(startListening, 50); // let onend run first
+    });
+
+    // Feature-detect BOTH globals before enabling anything.
+    function init() {
+      const missing = [];
+      if (!SpeechRecognitionCtor) missing.push('<code>SpeechRecognition</code> (Web Speech API)');
+      if (typeof Translator === 'undefined') missing.push('<code>Translator</code>');
+      if (missing.length) {
+        degrade('This browser is missing ' + missing.join(' and ') + '. You need desktop Chrome with built-in AI.');
+        renderTranscript();
+        renderTranslation();
+        return;
+      }
+      populateSelect(speechLangEl, SPEECH_LANGS, 'en-US');
+      populateSelect(targetLangEl, TARGET_LANGS, 'es');
+      renderTranscript();
+      renderTranslation();
+      setStatus('Ready. Pick languages, hit Start, and allow the microphone.', 'ok');
+      toggleBtn.disabled = false;
+    }
+
+    window.addEventListener('beforeunload', teardown);
+    init();
+  </script>
+</body>
+</html>

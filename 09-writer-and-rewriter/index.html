@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Writer &amp; Rewriter — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.15rem; margin-bottom: .25rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text], select { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; background: transparent; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .row .col { flex: 1 1 8rem; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    section { margin: 2rem 0; padding-top: .5rem; border-top: 1px solid #8883; }
+    .note { padding: .5rem .75rem; border-radius: .5rem; border: 1px dashed #8887;
+      margin: 1rem 0; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Writer &amp; Rewriter — on-device drafting</h1>
+  <p>Generate text with Chrome's built-in <code>Writer</code> and reshape it with
+    <code>Rewriter</code> (Gemini Nano), running on-device. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/writer-and-rewriter">Writer &amp; Rewriter</a>.</p>
+
+  <div class="note">Heads up: these two APIs are still behind Chrome flags and are
+    off by default, so on most machines they report <code>unavailable</code>. Enable
+    <code>#writer-api-for-gemini-nano</code> and <code>#rewriter-api-for-gemini-nano</code>
+    in <code>chrome://flags</code>, then restart Chrome. If they're off, each panel
+    below tells you which flag to flip.</div>
+
+  <!-- ---------- Writer ---------- -->
+  <section>
+    <h2>Writer — draft from a brief</h2>
+    <div id="w-status" class="status">Checking availability…</div>
+    <progress id="w-dl" max="1" hidden></progress>
+
+    <div class="field">
+      <label for="w-source">Task / brief</label>
+      <textarea id="w-source" rows="4">Draft a short release note for v2.0 of our CLI. It adds a --json output flag, native Windows builds, and fixes a crash on empty input.</textarea>
+    </div>
+
+    <div class="field row">
+      <div class="col">
+        <label for="w-tone">tone</label>
+        <select id="w-tone">
+          <option value="formal">formal</option>
+          <option value="neutral" selected>neutral</option>
+          <option value="casual">casual</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="w-format">format</label>
+        <select id="w-format">
+          <option value="markdown" selected>markdown</option>
+          <option value="plain-text">plain-text</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="w-length">length</label>
+        <select id="w-length">
+          <option value="short">short</option>
+          <option value="medium" selected>medium</option>
+          <option value="long">long</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="w-shared">sharedContext (optional) — the frame every draft is written in</label>
+      <input type="text" id="w-shared" placeholder="e.g. Developer changelog. Terse, second person, no marketing adjectives." />
+    </div>
+
+    <div class="actions">
+      <button id="w-run" disabled>Write</button>
+    </div>
+
+    <div id="w-output" class="output" aria-live="polite"></div>
+  </section>
+
+  <!-- ---------- Rewriter ---------- -->
+  <section>
+    <h2>Rewriter — reshape existing text</h2>
+    <div id="r-status" class="status">Checking availability…</div>
+    <progress id="r-dl" max="1" hidden></progress>
+
+    <div class="field">
+      <label for="r-source">Text to rewrite</label>
+      <textarea id="r-source" rows="4">hey team, shipped the thing finally. the json flag works now and windows builds are up. lemme know if anything breaks.</textarea>
+    </div>
+
+    <div class="field row">
+      <div class="col">
+        <label for="r-tone">tone</label>
+        <select id="r-tone">
+          <option value="as-is">as-is</option>
+          <option value="more-formal" selected>more-formal</option>
+          <option value="more-casual">more-casual</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="r-length">length</label>
+        <select id="r-length">
+          <option value="as-is" selected>as-is</option>
+          <option value="shorter">shorter</option>
+          <option value="longer">longer</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="r-format">format</label>
+        <select id="r-format">
+          <option value="as-is" selected>as-is</option>
+          <option value="markdown">markdown</option>
+          <option value="plain-text">plain-text</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="r-context">context (optional) — a per-call steer for this one rewrite</label>
+      <input type="text" id="r-context" placeholder="e.g. This is going in a public changelog for developers." />
+    </div>
+
+    <div class="actions">
+      <button id="r-run" disabled>Rewrite</button>
+    </div>
+
+    <div id="r-output" class="output" aria-live="polite"></div>
+  </section>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `Writer` and `Rewriter` globals.
+    // Both are flag-gated (origin trial), so availability() is usually "unavailable".
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/writer/writer-demo';
+
+    function setStatus(el, html, kind) {
+      el.className = 'status' + (kind ? ' ' + kind : '');
+      el.innerHTML = html;
+    }
+
+    function errName(e) { return e && e.name ? e.name : 'Error'; }
+    function errMessage(e) { return e && e.message ? e.message : String(e); }
+
+    // Wire one tool (Writer or Rewriter). Returns a teardown handle.
+    function setupTool(cfg) {
+      // `Writer` / `Rewriter` are bare globals; read them off window so we can
+      // parametrize by name. Missing global -> undefined -> degrade.
+      const api = typeof window[cfg.apiName] !== 'undefined' ? window[cfg.apiName] : undefined;
+
+      const statusEl = document.getElementById(cfg.ids.status);
+      const dlEl = document.getElementById(cfg.ids.dl);
+      const sourceEl = document.getElementById(cfg.ids.source);
+      const toneEl = document.getElementById(cfg.ids.tone);
+      const formatEl = document.getElementById(cfg.ids.format);
+      const lengthEl = document.getElementById(cfg.ids.length);
+      const extraEl = document.getElementById(cfg.ids.extra);
+      const runBtn = document.getElementById(cfg.ids.run);
+      const outputEl = document.getElementById(cfg.ids.output);
+
+      let instance = null;
+      let busy = false;
+
+      function degrade(reason) {
+        setStatus(
+          statusEl,
+          reason +
+            ' Enable <code>' + cfg.flag + '</code> in <code>chrome://flags</code> ' +
+            '(see <a href="' + SETUP_URL + '">Setup &amp; availability</a>), ' +
+            'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+          'err'
+        );
+        runBtn.disabled = true;
+      }
+
+      // Feature-detect + availability() gate before anything else.
+      async function init() {
+        if (!api) {
+          degrade('This browser has no built-in <code>' + cfg.apiName + '</code>.');
+          return;
+        }
+
+        let status;
+        try {
+          status = await api.availability();
+        } catch (e) {
+          degrade('<code>' + cfg.apiName + '.availability()</code> threw: ' + errMessage(e) + '.');
+          return;
+        }
+
+        if (status === 'unavailable') {
+          degrade('<code>' + cfg.apiName + '</code> reports <code>unavailable</code> — usually the flag is off.');
+          return;
+        }
+
+        if (status === 'available') {
+          setStatus(statusEl, 'Model ready. Fill the fields and run it.', 'ok');
+        } else {
+          setStatus(statusEl, 'Model needs a one-time download (a few GB). It starts on your first run.', 'warn');
+        }
+        runBtn.disabled = false;
+      }
+
+      // Build create() options from the selects. sharedContext is a Writer-side frame.
+      function buildCreateOptions() {
+        const options = {
+          tone: toneEl.value,
+          format: formatEl.value,
+          length: lengthEl.value,
+        };
+        if (cfg.kind === 'writer') {
+          const shared = extraEl.value.trim();
+          if (shared) options.sharedContext = shared;
+        }
+        return options;
+      }
+
+      // Fresh instance for the current options, wiring a download monitor.
+      async function createInstance() {
+        dlEl.hidden = false;
+        dlEl.value = 0;
+        setStatus(statusEl, 'Preparing the model…', 'warn');
+
+        const created = await api.create({
+          ...buildCreateOptions(),
+          monitor(m) {
+            m.addEventListener('downloadprogress', (e) => {
+              dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+              setStatus(statusEl, 'Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+            });
+          },
+        });
+
+        dlEl.hidden = true;
+        return created;
+      }
+
+      // Writer streams from the brief; Rewriter streams the transform, with a per-call context.
+      function startStream(text) {
+        if (cfg.kind === 'writer') {
+          return instance.writeStreaming(text);
+        }
+        const context = extraEl.value.trim();
+        return instance.rewriteStreaming(text, context ? { context } : undefined);
+      }
+
+      async function run() {
+        const text = sourceEl.value.trim();
+        if (!text || busy) return;
+
+        busy = true;
+        runBtn.disabled = true;
+        outputEl.textContent = '';
+
+        try {
+          // Options may have changed since the last run — recreate, don't leak.
+          if (instance) {
+            instance.destroy();
+            instance = null;
+          }
+          instance = await createInstance();
+
+          setStatus(statusEl, cfg.kind === 'writer' ? 'Writing…' : 'Rewriting…', 'warn');
+          const stream = startStream(text);
+          for await (const chunk of stream) {
+            outputEl.textContent += chunk; // deltas — append, never replace
+          }
+          setStatus(statusEl, 'Done. Change the options and run it again.', 'ok');
+        } catch (e) {
+          const name = errName(e);
+          if (name === 'QuotaExceededError') {
+            outputEl.textContent =
+              'Input is over the quota (QuotaExceededError). Trim it, or split it ' +
+              'into sections and run them one at a time.';
+          } else if (name === 'NotSupportedError') {
+            outputEl.textContent =
+              'That tone/format/length combo is not supported here (NotSupportedError). Try another.';
+          } else if (name === 'InvalidStateError') {
+            outputEl.textContent = 'That instance was destroyed. Run again to recreate it.';
+            instance = null;
+          } else {
+            outputEl.textContent = 'Error: ' + errMessage(e);
+          }
+          setStatus(statusEl, 'Error: ' + name + '.', 'err');
+        } finally {
+          busy = false;
+          runBtn.disabled = false;
+        }
+      }
+
+      runBtn.addEventListener('click', run);
+      init();
+
+      return {
+        destroy() {
+          if (instance) instance.destroy();
+        },
+      };
+    }
+
+    const writerTool = setupTool({
+      kind: 'writer',
+      apiName: 'Writer',
+      flag: '#writer-api-for-gemini-nano',
+      ids: { status: 'w-status', dl: 'w-dl', source: 'w-source', tone: 'w-tone',
+        format: 'w-format', length: 'w-length', extra: 'w-shared', run: 'w-run', output: 'w-output' },
+    });
+
+    const rewriterTool = setupTool({
+      kind: 'rewriter',
+      apiName: 'Rewriter',
+      flag: '#rewriter-api-for-gemini-nano',
+      ids: { status: 'r-status', dl: 'r-dl', source: 'r-source', tone: 'r-tone',
+        format: 'r-format', length: 'r-length', extra: 'r-context', run: 'r-run', output: 'r-output' },
+    });
+
+    // Free GPU memory on teardown — both instances.
+    window.addEventListener('beforeunload', () => {
+      writerTool.destroy();
+      rewriterTool.destroy();
+    });
+  </script>
+</body>
+</html>
