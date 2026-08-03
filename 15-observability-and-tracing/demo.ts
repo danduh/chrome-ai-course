@@ -30,12 +30,9 @@ interface LanguageModelCreateOptions {
 }
 interface LanguageModelSession {
   promptStreaming(input: string): ReadableStream<string>;
-  // Prompt API context accounting. Naming drift: the context* forms are current;
-  // input* survive on MDN and some builds — read defensively against both.
+  // Prompt API context accounting.
   readonly contextUsage?: number;
   readonly contextWindow?: number;
-  readonly inputUsage?: number;
-  readonly inputQuota?: number;
   destroy(): void;
 }
 
@@ -62,8 +59,8 @@ interface AiSpan {
   finish: AiFinish;
   ttftMs?: number; // streaming only: time to first chunk
   outChars?: number; // char proxy, NOT a token count
-  contextUsage?: number; // Prompt API only (drift-safe against inputUsage)
-  contextWindow?: number; // Prompt API only (drift-safe against inputQuota)
+  contextUsage?: number; // Prompt API only
+  contextWindow?: number; // Prompt API only
   errorName?: string; // DOMException.name on failure
   availability?: string; // availability() state captured before create()
   downloadPct?: number; // last downloadprogress value (0–100)
@@ -100,18 +97,16 @@ function errName(e: unknown): string | undefined {
 }
 const classify = (e: unknown): AiFinish => (errName(e) === 'AbortError' ? 'abort' : 'error');
 
-/** Prompt API only — drift-safe; getters can throw on a destroyed session. */
+/** Prompt API only — getters can throw on a destroyed session. */
 function readContext(session: unknown): Pick<AiSpan, 'contextUsage' | 'contextWindow'> {
   try {
     const s = (session ?? {}) as {
       contextUsage?: number;
       contextWindow?: number;
-      inputUsage?: number;
-      inputQuota?: number;
     };
     return {
-      contextUsage: s.contextUsage ?? s.inputUsage,
-      contextWindow: s.contextWindow ?? s.inputQuota,
+      contextUsage: s.contextUsage,
+      contextWindow: s.contextWindow,
     };
   } catch {
     return {};

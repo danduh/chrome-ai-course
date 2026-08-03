@@ -47,7 +47,7 @@
     (<code>initialize</code> → <code>tools/list</code>) against an MCP server over
     Streamable HTTP, then hands the discovered tools to Chrome's built-in
     <code>LanguageModel</code> (Gemini Nano), which drives them through a
-    <code>responseFormat</code> intent loop. Lesson:
+    <code>responseConstraint</code> intent loop. Lesson:
     <a href="https://danduh.me/courses/chrome-built-in-ai/mcp-client">An MCP client in the browser</a>.</p>
 
   <div id="status" class="status">Checking availability…</div>
@@ -114,7 +114,7 @@
   <script>
     // Plain browser JS. No frameworks, no SDK. The browser is an MCP CLIENT:
     // raw JSON-RPC 2.0 over Streamable HTTP (fetch), then Chrome's `LanguageModel`
-    // global drives the remote tools through a responseFormat intent loop.
+    // global drives the remote tools through a responseConstraint intent loop.
     const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/mcp-client';
     const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
     const LIVE_DEMO_URL = 'https://windowai.danduh.me/mcp-client';
@@ -159,7 +159,7 @@
     // The intent-loop schema and helpers (shared by every MCP server).
     // =====================================================================
 
-    // responseFormat schema — constrains Nano to emit ONE JSON tool call.
+    // responseConstraint schema — constrains Nano to emit ONE JSON tool call.
     const INTENT_SCHEMA = {
       type: 'object',
       required: ['toolName'],
@@ -171,7 +171,7 @@
       },
     };
 
-    // Even with responseFormat, some builds wrap JSON in a fence. 3 tiers:
+    // The model sometimes wraps JSON in a fence. 3 tiers:
     // direct parse -> strip a ```json ... ``` fence -> extract the first { ... }.
     function extractJsonFromResponse(text) {
       const s = String(text == null ? '' : text).trim();
@@ -430,7 +430,6 @@
       dlEl.value = 0;
       agentSession = await LanguageModel.create({
         outputLanguage: 'en',            // load-bearing — omit it and JSON degrades
-        responseFormat: INTENT_SCHEMA,   // constrain output to the intent shape
         initialPrompts: [{ role: 'system', content: buildSystemPrompt(tools) }],
         monitor: function (m) {
           m.addEventListener('downloadprogress', function (e) {
@@ -567,7 +566,8 @@
         let finished = false;
 
         for (let i = 0; i < MAX_TOOL_CALLS; i++) {
-          const raw = await session.prompt(promptText);
+          // responseConstraint rides on each prompt(), not create().
+          const raw = await session.prompt(promptText, { responseConstraint: INTENT_SCHEMA });
           const parsed = extractJsonFromResponse(raw);
 
           if (!parsed || typeof parsed.toolName !== 'string') {

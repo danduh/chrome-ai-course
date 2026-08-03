@@ -4,7 +4,7 @@
 // built or loaded by the page. The browser is an MCP CLIENT: it speaks raw
 // JSON-RPC 2.0 over Streamable HTTP (fetch) to an MCP server, then Chrome's
 // built-in `LanguageModel` (Gemini Nano) drives the discovered tools through a
-// responseFormat intent loop. A default in-page "mock server" runs the whole
+// responseConstraint intent loop. A default in-page "mock server" runs the whole
 // path offline; switching to a remote URL is CORS-gated.
 
 // --- Minimal ambient surface for Chrome's built-in Prompt API (current stable) ---
@@ -21,13 +21,12 @@ interface DownloadMonitor {
 interface LanguageModelCreateOptions {
   outputLanguage?: string;
   initialPrompts?: Array<{ role: Role; content: string }>;
-  responseFormat?: object; // JSON Schema (spec alias: responseConstraint)
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
 
 interface LanguageModelSession {
-  prompt(input: string): Promise<string>;
+  prompt(input: string, options?: { responseConstraint?: object; signal?: AbortSignal }): Promise<string>;
   destroy(): void;
 }
 
@@ -132,7 +131,7 @@ const INTENT_SCHEMA = {
   },
 } as const;
 
-// Even with responseFormat, some builds wrap JSON in a fence. 3 tiers:
+// The model sometimes wraps JSON in a fence. 3 tiers:
 // direct parse -> strip a ```json ... ``` fence -> extract the first { ... }.
 function extractJsonFromResponse(text: string): Record<string, unknown> | null {
   const s = String(text == null ? '' : text).trim();
@@ -423,7 +422,6 @@ async function getAgentSession(tools: McpToolInfo[]): Promise<LanguageModelSessi
   dlEl.value = 0;
   agentSession = await LanguageModel.create({
     outputLanguage: 'en',           // load-bearing — omit it and JSON degrades
-    responseFormat: INTENT_SCHEMA,  // constrain output to the intent shape
     initialPrompts: [{ role: 'system', content: buildSystemPrompt(tools) }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
@@ -559,7 +557,8 @@ async function runAgent(): Promise<void> {
     let finished = false;
 
     for (let i = 0; i < MAX_TOOL_CALLS; i++) {
-      const raw = await session.prompt(promptText);
+      // responseConstraint rides on each prompt(), not create().
+      const raw = await session.prompt(promptText, { responseConstraint: INTENT_SCHEMA });
       const parsed = extractJsonFromResponse(raw);
 
       if (!parsed || typeof parsed.toolName !== 'string') {

@@ -5,7 +5,7 @@
 // below: Chrome's Prompt API (`LanguageModel`) and WebMCP (`document.modelContext`).
 // In a real project, @types/dom-chromium-ai ships the Prompt API declarations;
 // WebMCP has no published types yet, so the ambient block here matches the shape
-// shipped in Chrome 150.
+// Chrome ships.
 
 // --- Ambient surface 1: Chrome's built-in Prompt API (current stable) --------
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
@@ -21,13 +21,15 @@ interface DownloadMonitor {
 interface LanguageModelCreateOptions {
   outputLanguage?: string;
   initialPrompts?: Array<{ role: Role; content: string }>;
-  responseFormat?: object; // JSON Schema (spec alias: responseConstraint)
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
 
 interface LanguageModelSession {
-  prompt(input: string, options?: { signal?: AbortSignal }): Promise<string>;
+  prompt(
+    input: string,
+    options?: { responseConstraint?: object; signal?: AbortSignal },
+  ): Promise<string>;
   destroy(): void;
 }
 
@@ -36,9 +38,8 @@ declare const LanguageModel: {
   create(options?: LanguageModelCreateOptions): Promise<LanguageModelSession>;
 };
 
-// --- Ambient surface 2: WebMCP (Chrome 150). Mirrors chat/src/app/types/webmcp.d.ts.
-// The entry point moved to `document.modelContext`; `navigator.modelContext` is
-// the deprecated 146-149 fallback. Both are augmented onto the DOM lib types.
+// --- Ambient surface 2: WebMCP. Mirrors chat/src/app/types/webmcp.d.ts.
+// The page's tools live on `document.modelContext`, augmented onto the DOM lib types.
 interface ModelContextTool {
   name: string;
   description: string;
@@ -60,10 +61,6 @@ interface ModelContext {
 }
 
 interface Document {
-  readonly modelContext?: ModelContext;
-}
-interface Navigator {
-  /** @deprecated Deprecated in Chrome 150; use document.modelContext. */
   readonly modelContext?: ModelContext;
 }
 
@@ -92,7 +89,7 @@ type CartItem = { name: string; qty: number };
 
 // The page state. One array. The tools and the buttons share it.
 let cart: CartItem[] = [];
-let modelContext: ModelContext | null = null; // document.modelContext ?? navigator.modelContext
+let modelContext: ModelContext | null = null; // resolved from document.modelContext in init()
 let controller: AbortController | null = null; // governs every registration
 let session: LanguageModelSession | null = null; // the in-page LanguageModel agent
 let busy = false;
@@ -281,7 +278,7 @@ const SYSTEM_PROMPT = [
   'When the request is fully handled, emit { "toolName": "done", "reply": "<short summary>" }.',
 ].join('\n');
 
-// --- Fence-stripping JSON parse. responseFormat still fences sometimes. -------
+// --- Fence-stripping JSON parse. The model still fences JSON sometimes. -------
 function parseJson<T>(text: string): T | null {
   const s = String(text == null ? '' : text).trim();
   try {
@@ -315,7 +312,6 @@ async function getSession(): Promise<LanguageModelSession> {
   dlEl.value = 0;
   session = await LanguageModel.create({
     outputLanguage: 'en', // always — this is load-bearing
-    responseFormat: INTENT_SCHEMA,
     initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
@@ -343,7 +339,8 @@ async function runAgent(): Promise<void> {
     let finished = false;
 
     for (let i = 0; i < MAX_STEPS; i++) {
-      const step = parseJson<Step>(await s.prompt(next));
+      // responseConstraint (the intent JSON Schema) rides on prompt(), not create().
+      const step = parseJson<Step>(await s.prompt(next, { responseConstraint: INTENT_SCHEMA }));
 
       if (!step || typeof step.toolName !== 'string') {
         logStep(i + 1, '(parse failed)', {}, '');
@@ -433,9 +430,8 @@ runBtn.addEventListener('click', () => void runAgent());
 async function init(): Promise<void> {
   renderCart();
 
-  // 1) WebMCP entry point. document.modelContext is Chrome 150+;
-  //    navigator.modelContext is the deprecated 146-149 fallback.
-  modelContext = document.modelContext || navigator.modelContext || null;
+  // 1) WebMCP entry point. The page's tools live on document.modelContext.
+  modelContext = document.modelContext ?? null;
   if (!modelContext) {
     renderTools(0);
     toolsNoteEl.innerHTML =

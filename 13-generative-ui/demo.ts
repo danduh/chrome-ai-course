@@ -19,14 +19,13 @@ interface DownloadMonitor {
 interface LanguageModelCreateOptions {
   outputLanguage?: string;
   initialPrompts?: Array<{ role: Role; content: string }>;
-  responseFormat?: object; // JSON Schema (spec alias: responseConstraint)
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
 
 interface PromptOptions {
+  responseConstraint?: object; // JSON Schema, passed per call
   signal?: AbortSignal;
-  responseFormat?: object;
 }
 
 interface LanguageModelSession {
@@ -276,7 +275,6 @@ async function createSession(
 async function getToolSession(): Promise<LanguageModelSession> {
   if (!toolSession) {
     toolSession = await createSession({
-      responseFormat: INTENT_SCHEMA,
       initialPrompts: [{ role: 'system', content: TOOL_SYSTEM }],
     });
   }
@@ -306,7 +304,8 @@ async function driveLoop(
     // Invariant: the literal ui:// must NEVER reach session.prompt().
     console.assert(next.indexOf('ui://') === -1, 'ui:// leaked into the model prompt');
 
-    const raw = await session.prompt(next);
+    // responseConstraint rides on each prompt(), not create().
+    const raw = await session.prompt(next, { responseConstraint: INTENT_SCHEMA });
     const step = parseJson<Step>(raw);
 
     if (!step || typeof step.toolName !== 'string') {

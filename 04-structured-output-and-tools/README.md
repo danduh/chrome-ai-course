@@ -13,14 +13,14 @@ Hosted demo: **[windowai.danduh.me/tool-calling/tool-calling-demo](https://windo
 
 - Feature-detecting `LanguageModel` and gating on `availability()` before `create()`.
 - Showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction).
-- **Part 1 — structured output:** passing a JSON Schema as `responseFormat` so the reply is constrained to `{ sentiment, topics, summary }`, then parsing it with a fence-stripping guard (`responseFormat` still emits fenced JSON on some builds).
-- **Part 2 — tool calling via the intent loop:** a session created with `responseFormat: INTENT_SCHEMA` (`{ toolName, args, reply }`) and a system prompt that lists the tools; the loop prompts, parses, runs a local JS tool (`getWeather` / `calculate`), feeds the result back, and repeats — capped at 8 steps, with every step logged.
+- **Part 1 — structured output:** passing a JSON Schema as `responseConstraint` on `prompt()` so the reply is constrained to `{ sentiment, topics, summary }`, then parsing it with a fence-stripping guard (the model sometimes wraps JSON in a fence).
+- **Part 2 — tool calling via the intent loop:** a session created with a system prompt that lists the tools, then each turn prompts with `responseConstraint: INTENT_SCHEMA` (`{ toolName, args, reply }`), parses, runs a local JS tool (`getWeather` / `calculate`), feeds the result back, and repeats — capped at 8 steps, with every step logged.
 - Passing `outputLanguage: 'en'` to every `create()`, and `destroy()` on `beforeunload`.
 - Graceful degradation when the API is missing or `unavailable`.
 
 The intent loop is the reliable path because native `tools` was unreliable on
 recent Canary builds (`Tool use feature not enabled`); the loop leans only on
-`responseFormat`, which is stable. The lesson covers both.
+`responseConstraint`. The lesson covers both.
 
 ## Files
 

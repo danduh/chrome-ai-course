@@ -51,17 +51,12 @@ interface CallOptions {
 interface WriterInstance {
   write(input: string, options?: CallOptions): Promise<string>;
   writeStreaming(input: string, options?: CallOptions): ReadableStream<string>;
-  // Present on current builds; feature-detect before calling.
-  measureInputUsage?(input: string): Promise<number>;
-  readonly inputQuota: number;
   destroy(): void;
 }
 
 interface RewriterInstance {
   rewrite(input: string, options?: CallOptions): Promise<string>;
   rewriteStreaming(input: string, options?: CallOptions): ReadableStream<string>;
-  measureInputUsage?(input: string): Promise<number>;
-  readonly inputQuota: number;
   destroy(): void;
 }
 

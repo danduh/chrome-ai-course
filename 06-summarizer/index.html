@@ -27,7 +27,6 @@
     .row { display: flex; gap: .75rem; flex-wrap: wrap; }
     .row .col { flex: 1 1 8rem; }
     .actions { display: flex; gap: .5rem; margin: .75rem 0; }
-    .quota { font-size: .9rem; opacity: .8; margin: .5rem 0; min-height: 1.2em; }
   </style>
 </head>
 <body>
@@ -84,7 +83,6 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
     <button id="run" disabled>Summarize</button>
   </div>
 
-  <div id="quota" class="quota" aria-live="polite"></div>
   <div id="output" class="output" aria-live="polite"></div>
 
   <script>
@@ -101,7 +99,6 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
     const lengthEl = document.getElementById('length');
     const sharedEl = document.getElementById('shared');
     const runBtn = document.getElementById('run');
-    const quotaEl = document.getElementById('quota');
     const outputEl = document.getElementById('output');
 
     let summarizer = null;
@@ -178,21 +175,6 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
       return created;
     }
 
-    // Optional: show how much of the input budget this text costs.
-    async function showQuota(instance, text) {
-      quotaEl.textContent = '';
-      if (typeof instance.measureInputUsage !== 'function') return;
-      try {
-        const usage = await instance.measureInputUsage(text);
-        const quota = instance.inputQuota;
-        quotaEl.textContent = quota
-          ? usage + ' / ' + quota + ' input tokens'
-          : usage + ' input tokens';
-      } catch {
-        // measureInputUsage present but threw — skip the readout.
-      }
-    }
-
     async function run() {
       const text = sourceEl.value.trim();
       if (!text || busy) return;
@@ -200,7 +182,6 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
       busy = true;
       runBtn.disabled = true;
       outputEl.textContent = '';
-      quotaEl.textContent = '';
 
       try {
         // Options may have changed since the last run — recreate, don't leak.
@@ -209,8 +190,6 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
           summarizer = null;
         }
         summarizer = await createSummarizer();
-
-        await showQuota(summarizer, text);
 
         setStatus('Summarizing…', 'warn');
         const stream = summarizer.summarizeStreaming(text);

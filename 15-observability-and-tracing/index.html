@@ -146,12 +146,12 @@
       return { id, ts: Date.now(), api, op, stream, latencyMs: 0, finish: 'ok' };
     }
     const classify = (e) => (e && e.name) === 'AbortError' ? 'abort' : 'error';
-    function readContext(session) {          // Prompt API only; drift-safe; may throw after destroy()
+    function readContext(session) {          // Prompt API only; may throw after destroy()
       try {
         if (!session) return {};
         return {
-          contextUsage: session.contextUsage ?? session.inputUsage,
-          contextWindow: session.contextWindow ?? session.inputQuota,
+          contextUsage: session.contextUsage,
+          contextWindow: session.contextWindow,
         };
       } catch { return {}; }
     }

@@ -131,7 +131,7 @@
 
     // --- The page state. One array. The tools and the buttons share it. ------
     let cart = [];        // [{ name: string, qty: number }]
-    let modelContext = null; // document.modelContext ?? navigator.modelContext
+    let modelContext = null; // resolved from document.modelContext in init()
     let controller = null;   // AbortController governing every registration
     let session = null;      // the in-page LanguageModel agent
     let busy = false;
@@ -316,7 +316,7 @@
       'When the request is fully handled, emit { "toolName": "done", "reply": "<short summary>" }.',
     ].join('\n');
 
-    // --- Fence-stripping JSON parse. responseFormat still fences sometimes. ---
+    // --- Fence-stripping JSON parse. The model still fences JSON sometimes. ---
     function parseJson(text) {
       const s = String(text == null ? '' : text).trim();
       try { return JSON.parse(s); } catch (e) { /* fall through */ }
@@ -334,7 +334,6 @@
       dlEl.value = 0;
       session = await LanguageModel.create({
         outputLanguage: 'en', // always — this is load-bearing
-        responseFormat: INTENT_SCHEMA,
         initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }],
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
@@ -362,7 +361,8 @@
         let finished = false;
 
         for (let i = 0; i < MAX_STEPS; i++) {
-          const step = parseJson(await s.prompt(next));
+          // responseConstraint (the intent JSON Schema) rides on prompt(), not create().
+          const step = parseJson(await s.prompt(next, { responseConstraint: INTENT_SCHEMA }));
 
           if (!step || typeof step.toolName !== 'string') {
             logStep(i + 1, '(parse failed)', {}, '');
@@ -430,9 +430,8 @@
     async function init() {
       renderCart();
 
-      // 1) WebMCP entry point. document.modelContext is Chrome 150+;
-      //    navigator.modelContext is the deprecated 146-149 fallback.
-      modelContext = document.modelContext || navigator.modelContext || null;
+      // 1) WebMCP entry point. The page's tools live on document.modelContext.
+      modelContext = document.modelContext || null;
       if (!modelContext) {
         renderTools(0);
         toolsNoteEl.innerHTML =

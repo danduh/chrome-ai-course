@@ -11,20 +11,21 @@ Hosted demo: **[windowai.danduh.me/webmcp](https://windowai.danduh.me/webmcp)**
 
 ## What it shows
 
-- Resolving the entry point across versions: `document.modelContext ?? navigator.modelContext` (`navigator.modelContext` is deprecated in Chrome 150).
+- Registering tools on `document.modelContext`.
 - Registering three tools (`addItem`, `removeItem`, `listItems`) with `registerTool({ name, description, inputSchema, annotations, execute })`, each under one `AbortController`.
 - Tearing down every registration with a single `controller.abort()` on `beforeunload` (portable across Chrome 146–150; no `unregisterTool` needed).
 - **One definition, two consumers:** the same `CART_TOOLS` array is registered on `document.modelContext` (for external agents) and dispatched into by the in-page agent loop.
-- Wiring an in-page `LanguageModel` agent that actually calls the tools: a session with `responseFormat: INTENT_SCHEMA` and a system prompt that lists the tools, looping prompt → parse → run the tool → feed the result back, logging every call.
+- Wiring an in-page `LanguageModel` agent that actually calls the tools: a session with a system prompt that lists the tools, looping prompt (with `responseConstraint: INTENT_SCHEMA`) → parse → run the tool → feed the result back, logging every call.
 - Coercing a WebMCP `execute` result (`Promise<unknown>`) to the string the agent loop feeds back.
 - Feature-detecting **both** `document.modelContext` and `LanguageModel`, degrading gracefully when either is missing (flag guidance + Setup + hosted-demo links) — the cart stays usable either way.
 - Passing `outputLanguage: 'en'` to `create()`, showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction), and `destroy()` on teardown.
 
-The in-page agent uses the intent loop (a `responseFormat` JSON schema plus a
+The in-page agent uses the intent loop (a `responseConstraint` JSON schema plus a
 prompt/parse/run/feed cycle) rather than `LanguageModel.create({ tools })`,
 because that native tool-calling codepath was unreliable on recent Canary. The
-loop leans only on `responseFormat`, which is stable — and it dispatches into the
-exact same tool descriptors that are registered on `document.modelContext`.
+loop leans only on `responseConstraint` passed to `prompt()`, and it dispatches
+into the exact same tool descriptors that are registered on
+`document.modelContext`.
 
 ## Files
 
@@ -57,7 +58,7 @@ path.
 ## Requirements
 
 - **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- WebMCP enabled via `chrome://flags/#enable-webmcp-testing` (Chrome 149+ ships it as a public origin trial; Chrome 146–148 Canary used `chrome://flags/#WebMCP for testing`). `navigator.modelContext` is deprecated in Chrome 150 — the demo prefers `document.modelContext`.
+- WebMCP enabled via `chrome://flags/#enable-webmcp-testing` (Chrome 149+ ships it as a public origin trial). The demo registers tools on `document.modelContext`.
 - Built-in AI available for the agent: ~22 GB free disk (Chrome stores the ~4 GB model), a GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a non-metered connection for the one-time download. If the demo says the model is missing, work through [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).
 
 ## Caveat — don't ship this to production

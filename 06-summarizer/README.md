@@ -15,7 +15,6 @@ Hosted demo: **[windowai.danduh.me/summary/summary-demo](https://windowai.danduh
 - Creating a summarizer with `type`, `format`, and `length` — including the `tl;dr` type (note the semicolon).
 - An optional `sharedContext` field that frames every summary the instance produces.
 - Streaming the summary with `summarizeStreaming()` and appending the deltas (`text += chunk`).
-- An input-budget readout via `measureInputUsage()` against `inputQuota` when the runtime exposes it.
 - Recreating the summarizer per run (options can change) and calling `destroy()` on `beforeunload`.
 - Graceful degradation when the API is missing or `unavailable`, plus handling for `QuotaExceededError`, `NotSupportedError`, and `InvalidStateError`.
 

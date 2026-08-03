@@ -4,7 +4,7 @@ The inverse of WebMCP: instead of the page exposing tools, the page is the MCP
 **client**. It runs the JSON-RPC handshake (`initialize` → `tools/list`) against
 an MCP server over Streamable HTTP, then hands the discovered tools to Chrome's
 built-in `LanguageModel` (Gemini Nano), which drives them through a
-`responseFormat` intent loop — each tool call becomes a `tools/call` request to
+`responseConstraint` intent loop — each tool call becomes a `tools/call` request to
 the server. No frameworks, no SDK, no build step — plain browser JavaScript,
 inline in `index.html`.
 
@@ -25,11 +25,11 @@ Hosted demo: **[windowai.danduh.me/mcp-client](https://windowai.danduh.me/mcp-cl
 - **The handshake, by hand:** `initialize` → `notifications/initialized` →
   `tools/list`, then `tools/call` on demand — the exact JSON-RPC an SDK would
   send, written out so you can see the wire.
-- **The bridge to Gemini Nano:** a session created with
-  `responseFormat: INTENT_SCHEMA` (`{ toolName, args, reply }`) and a system
-  prompt listing the server's tools; the loop prompts, parses (fence-stripping
-  guard), dispatches the named tool as `tools/call`, feeds the flattened result
-  back, and repeats — capped at 8 turns.
+- **The bridge to Gemini Nano:** a session created with a system prompt listing
+  the server's tools; each turn prompts with `responseConstraint: INTENT_SCHEMA`
+  (`{ toolName, args, reply }`), parses (fence-stripping guard), dispatches the
+  named tool as `tools/call`, feeds the flattened result back, and repeats —
+  capped at 8 turns.
 - Feature-detecting `LanguageModel` and gating on `availability()` before
   `create()`, showing first-run download progress with a `monitor` (`e.loaded` is
   a 0..1 fraction), passing `outputLanguage: 'en'`, and `destroy()` on teardown.
@@ -37,8 +37,8 @@ Hosted demo: **[windowai.danduh.me/mcp-client](https://windowai.danduh.me/mcp-cl
   only the agent step needs the Prompt API, so it's gated on its own.
 
 The intent loop is the reliable path because native `tools` was unreliable on the
-Chrome build this was written against; the loop leans only on `responseFormat`,
-which is stable. The lesson covers both.
+Chrome build this was written against; the loop leans only on `responseConstraint`.
+The lesson covers both.
 
 ## Files
 

@@ -40,9 +40,6 @@ interface SummarizerInstance {
     input: string,
     options?: SummarizeOptions,
   ): ReadableStream<string>;
-  // Present on current builds; feature-detect before calling.
-  measureInputUsage?(input: string): Promise<number>;
-  readonly inputQuota: number;
   destroy(): void;
 }
 
@@ -65,7 +62,6 @@ const formatEl = document.getElementById('format') as HTMLSelectElement;
 const lengthEl = document.getElementById('length') as HTMLSelectElement;
 const sharedEl = document.getElementById('shared') as HTMLInputElement;
 const runBtn = document.getElementById('run') as HTMLButtonElement;
-const quotaEl = document.getElementById('quota') as HTMLDivElement;
 const outputEl = document.getElementById('output') as HTMLDivElement;
 
 let summarizer: SummarizerInstance | null = null;
@@ -153,24 +149,6 @@ async function createSummarizer(): Promise<SummarizerInstance> {
   return created;
 }
 
-// Optional: show how much of the input budget this text costs.
-async function showQuota(
-  instance: SummarizerInstance,
-  text: string,
-): Promise<void> {
-  quotaEl.textContent = '';
-  if (typeof instance.measureInputUsage !== 'function') return;
-  try {
-    const usage = await instance.measureInputUsage(text);
-    const quota = instance.inputQuota;
-    quotaEl.textContent = quota
-      ? usage + ' / ' + quota + ' input tokens'
-      : usage + ' input tokens';
-  } catch {
-    // measureInputUsage present but threw — skip the readout.
-  }
-}
-
 async function run(): Promise<void> {
   const text = sourceEl.value.trim();
   if (!text || busy) return;
@@ -178,7 +156,6 @@ async function run(): Promise<void> {
   busy = true;
   runBtn.disabled = true;
   outputEl.textContent = '';
-  quotaEl.textContent = '';
 
   try {
     // Options may have changed since the last run — recreate, don't leak.
@@ -187,8 +164,6 @@ async function run(): Promise<void> {
       summarizer = null;
     }
     summarizer = await createSummarizer();
-
-    await showQuota(summarizer, text);
 
     setStatus('Summarizing…', 'warn');
     const stream = summarizer.summarizeStreaming(text);

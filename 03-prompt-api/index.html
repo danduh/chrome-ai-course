@@ -108,10 +108,9 @@
 
     function updateTokens() {
       if (session) {
-        // Drift-safe: Chrome renamed inputUsage/inputQuota -> contextUsage/contextWindow.
         tokensEl.textContent =
-          (session.contextUsage ?? session.inputUsage) + ' / ' +
-          (session.contextWindow ?? session.inputQuota) + ' input tokens';
+          (session.contextUsage) + ' / ' +
+          (session.contextWindow) + ' input tokens';
       }
     }
 

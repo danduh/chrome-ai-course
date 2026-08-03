@@ -15,7 +15,7 @@ Hosted demo: **[windowai.danduh.me/chat/chat-demo](https://windowai.danduh.me/ch
 - Creating a session with `initialPrompts` (a `system` message at index 0) and `outputLanguage: 'en'`.
 - Seeding the `temperature` and `topK` inputs from `LanguageModel.params()` when the runtime exposes it.
 - Streaming the reply with `promptStreaming()` and appending the deltas (`text += chunk`).
-- A live `contextUsage` / `contextWindow` token readout after each turn (drift-safe against the legacy `inputUsage`/`inputQuota`).
+- A live `contextUsage` / `contextWindow` token readout after each turn.
 - A "Reset session" button that calls `destroy()` and recreates the session with the current settings.
 - `destroy()` on `beforeunload`, plus graceful degradation when the API is missing or `unavailable`.
 

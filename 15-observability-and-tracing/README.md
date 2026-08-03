@@ -24,7 +24,7 @@ Hosted demo: **[windowai.danduh.me/observability](https://windowai.danduh.me/obs
   exposes no version).
 - Feature-detecting the global and gating on `availability()` before `create()`,
   with a `monitor` download progress bar (`e.loaded` is a 0..1 fraction).
-- Drift-safe context reading — `session.contextUsage ?? session.inputUsage` —
+- Context reading via `session.contextUsage` / `session.contextWindow` —
   which is why `contextUsage` shows up on the **Prompt API** and is absent on the
   Summarizer.
 - `destroy()` after each run and on `beforeunload` to free GPU memory, plus a

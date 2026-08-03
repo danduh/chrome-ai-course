@@ -34,8 +34,8 @@ interface LanguageModelCreateOptions {
 interface LanguageModelSession {
   prompt(input: string, options?: { signal?: AbortSignal }): Promise<string>;
   destroy(): void;
-  readonly inputUsage: number;
-  readonly inputQuota: number;
+  readonly contextUsage: number;
+  readonly contextWindow: number;
 }
 
 declare const LanguageModel: {

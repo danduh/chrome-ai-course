@@ -26,15 +26,14 @@ interface ToolDefinition {
 interface LanguageModelCreateOptions {
   outputLanguage?: string;
   initialPrompts?: Array<{ role: Role; content: string }>;
-  responseFormat?: object; // JSON Schema (spec alias: responseConstraint)
   tools?: ToolDefinition[];
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
 
 interface PromptOptions {
+  responseConstraint?: object; // JSON Schema, passed per call
   signal?: AbortSignal;
-  responseFormat?: object; // per-call schema
 }
 
 interface LanguageModelSession {
@@ -161,8 +160,8 @@ const TOOL_SYSTEM = [
   'When you can answer, emit { "toolName": "done", "reply": "<your answer>" }.',
 ].join('\n');
 
-// --- Fence-stripping JSON parse. Even with responseFormat some builds wrap
-// JSON in a fenced block; peel it off before parsing. 3 tiers:
+// --- Fence-stripping JSON parse. The model sometimes wraps JSON in a fence;
+// peel it off before parsing. 3 tiers:
 // direct parse -> strip a ```json ... ``` fence -> extract the first { ... }.
 function parseJson<T>(text: string): T | null {
   const s = String(text == null ? '' : text).trim();
@@ -227,7 +226,6 @@ async function getExtractSession(): Promise<LanguageModelSession> {
 async function getToolSession(): Promise<LanguageModelSession> {
   if (!toolSession) {
     toolSession = await createSession({
-      responseFormat: INTENT_SCHEMA,
       initialPrompts: [{ role: 'system', content: TOOL_SYSTEM }],
     });
   }
@@ -246,7 +244,7 @@ async function runExtract(): Promise<void> {
     const session = await getExtractSession();
     const raw = await session.prompt(
       'Extract the sentiment, the main topics, and a one-line summary of this text:\n\n' + text,
-      { responseFormat: EXTRACT_SCHEMA },
+      { responseConstraint: EXTRACT_SCHEMA },
     );
     const data = parseJson<Extraction>(raw);
     if (!data || typeof data.sentiment !== 'string') {
@@ -323,7 +321,8 @@ async function runAgent(): Promise<void> {
     let finished = false;
 
     for (let i = 0; i < MAX_STEPS; i++) {
-      const raw = await session.prompt(next);
+      // responseConstraint rides on each prompt(), not create().
+      const raw = await session.prompt(next, { responseConstraint: INTENT_SCHEMA });
       const step = parseJson<Step>(raw);
 
       if (!step || typeof step.toolName !== 'string') {

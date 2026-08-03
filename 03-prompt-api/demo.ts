@@ -41,12 +41,8 @@ interface LanguageModelSession {
   ): ReadableStream<string>;
   clone(options?: { signal?: AbortSignal }): Promise<LanguageModelSession>;
   destroy(): void;
-  // Current names (Chrome renamed these from inputUsage/inputQuota).
   readonly contextUsage?: number;
   readonly contextWindow?: number;
-  // Legacy pre-rename names — still present on some Chrome builds.
-  readonly inputUsage?: number;
-  readonly inputQuota?: number;
   readonly temperature: number;
   readonly topK: number;
 }
@@ -103,8 +99,8 @@ function degrade(reason: string): void {
 function updateTokens(): void {
   if (session) {
     tokensEl.textContent =
-      (session.contextUsage ?? session.inputUsage ?? 0) + ' / ' +
-      (session.contextWindow ?? session.inputQuota ?? 0) + ' input tokens';
+      (session.contextUsage ?? 0) + ' / ' +
+      (session.contextWindow ?? 0) + ' input tokens';
   }
 }
 

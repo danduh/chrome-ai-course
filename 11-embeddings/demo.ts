@@ -2,7 +2,7 @@
 //
 // This mirrors the inline <script> in index.html with types added. It is not
 // built or loaded by the page. SemanticEmbedder is a bare global (like
-// LanguageModel), NOT window.ai, and the canonical @types/dom-chromium-ai package
+// LanguageModel), and the canonical @types/dom-chromium-ai package
 // does not ship it yet — so the minimal ambient surface below keeps this file
 // self-contained.
 
