@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Translator + Language Detector — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text], select { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .row .col { flex: 1 1 12rem; }
+    .detect { font-size: .95rem; margin: .5rem 0; }
+    .detect .rowline { display: flex; justify-content: space-between;
+      padding: .2rem .5rem; border: 1px solid #8883; border-radius: .4rem; margin: .25rem 0; }
+    .detect .rowline.top { border-color: #2a7; }
+  </style>
+</head>
+<body>
+  <h1>Translator + Language Detector</h1>
+  <p>Detect a language on-device, then translate it — no server, no API key. Uses
+    Chrome's built-in <code>LanguageDetector</code> and <code>Translator</code>
+    globals. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/translator-and-language-detector">Translator + Language Detector</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <div class="field">
+    <label for="source">Text to translate</label>
+    <textarea id="source" rows="3">Bonjour ! J'espère que vous passez une excellente journée. On se voit demain au bureau ?</textarea>
+  </div>
+
+  <div class="actions">
+    <button id="detect" disabled>Detect language</button>
+  </div>
+  <div id="detectOut" class="detect" aria-live="polite"></div>
+
+  <div class="field row">
+    <div class="col">
+      <label for="sourceLang">Source language</label>
+      <select id="sourceLang"></select>
+    </div>
+    <div class="col">
+      <label for="targetLang">Target language</label>
+      <select id="targetLang"></select>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="translate" disabled>Translate</button>
+  </div>
+
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `LanguageDetector` and
+    // `Translator` globals — both stable in desktop Chrome since 138.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/translator-and-language-detector';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/translate/translate-demo';
+
+    // BCP-47 short codes — packs download per (source, target) pair.
+    const LANGS = [
+      { code: 'en', name: 'English' },
+      { code: 'es', name: 'Spanish' },
+      { code: 'fr', name: 'French' },
+      { code: 'de', name: 'German' },
+      { code: 'ja', name: 'Japanese' },
+      { code: 'uk', name: 'Ukrainian' },
+      { code: 'ru', name: 'Russian' },
+      { code: 'zh', name: 'Chinese' },
+    ];
+    // Below this, treat the detected language as a guess, not a source.
+    const CONFIDENCE_FLOOR = 0.4;
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const sourceEl = document.getElementById('source');
+    const detectBtn = document.getElementById('detect');
+    const detectOut = document.getElementById('detectOut');
+    const sourceLangEl = document.getElementById('sourceLang');
+    const targetLangEl = document.getElementById('targetLang');
+    const translateBtn = document.getElementById('translate');
+    const outputEl = document.getElementById('output');
+
+    let detector = null;      // one LanguageDetector, reused
+    let translator = null;    // current Translator
+    let translatorKey = '';   // 'src->tgt' the current translator is built for
+    let detectedSource = '';  // top detected language, if confident enough
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      detectBtn.disabled = true;
+      translateBtn.disabled = true;
+    }
+
+    function langName(code) {
+      try {
+        return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+      } catch {
+        return code;
+      }
+    }
+
+    function populateSelect(sel, def) {
+      sel.innerHTML = LANGS
+        .map((l) => '<option value="' + l.code + '"' + (l.code === def ? ' selected' : '') + '>' + l.name + '</option>')
+        .join('');
+    }
+
+    function errName(e) {
+      return e && e.name ? e.name : 'Error';
+    }
+
+    function errMessage(e) {
+      return e && e.message ? e.message : errName(e);
+    }
+
+    // Render the ranked detection results. Results arrive sorted by confidence
+    // descending and usually end with a trailing 'und' (unknown) entry.
+    function renderDetection(results) {
+      detectOut.innerHTML = results
+        .slice(0, 4)
+        .map((r, i) => {
+          const pct = (r.confidence * 100).toFixed(1) + '%';
+          const label = r.detectedLanguage === 'und'
+            ? 'und (unknown)'
+            : langName(r.detectedLanguage) + ' (' + r.detectedLanguage + ')';
+          const cls = i === 0 ? 'rowline top' : 'rowline';
+          return '<div class="' + cls + '"><span>' + label + '</span><span>' + pct + '</span></div>';
+        })
+        .join('');
+    }
+
+    // Feature-detect both globals before anything else.
+    async function init() {
+      if (typeof LanguageDetector === 'undefined' || typeof Translator === 'undefined') {
+        degrade('This browser is missing the built-in <code>Translator</code> / <code>LanguageDetector</code> globals. You need desktop Chrome with built-in AI.');
+        return;
+      }
+      populateSelect(sourceLangEl, 'fr');
+      populateSelect(targetLangEl, 'en');
+      setStatus('Ready. Detect the language, or pick a source and hit Translate.', 'ok');
+      detectBtn.disabled = false;
+      translateBtn.disabled = false;
+    }
+
+    // Lazily create one detector, wiring a monitor for the first-run download.
+    async function ensureDetector() {
+      if (detector) return detector;
+
+      const status = await LanguageDetector.availability();
+      if (status === 'unavailable') {
+        throw new DOMException('Language detection is unavailable on this device.', 'NotSupportedError');
+      }
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      detector = await LanguageDetector.create({
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            setStatus('Downloading the detector model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+      dlEl.hidden = true;
+      return detector;
+    }
+
+    async function runDetect() {
+      const text = sourceEl.value.trim();
+      if (!text || busy) return;
+
+      busy = true;
+      detectBtn.disabled = true;
+      translateBtn.disabled = true;
+      detectOut.textContent = '';
+
+      try {
+        setStatus('Detecting the language…', 'warn');
+        const d = await ensureDetector();
+        const results = await d.detect(text);
+        renderDetection(results);
+
+        const top = results[0];
+        if (top && top.detectedLanguage !== 'und' && top.confidence >= CONFIDENCE_FLOOR) {
+          detectedSource = top.detectedLanguage;
+          if (LANGS.some((l) => l.code === detectedSource)) {
+            sourceLangEl.value = detectedSource;
+          }
+          setStatus('Detected ' + langName(detectedSource) + '. Pick a target and hit Translate.', 'ok');
+        } else {
+          detectedSource = '';
+          setStatus('Not sure what language that is (und or low confidence). Pick a source language by hand.', 'warn');
+        }
+      } catch (e) {
+        setStatus('Detection failed: ' + errName(e) + '.', 'err');
+      } finally {
+        busy = false;
+        detectBtn.disabled = false;
+        translateBtn.disabled = false;
+      }
+    }
+
+    // Probe the pair, then create (and cache) a translator for it. A different
+    // pair means a different pack — destroy the old instance and build a new one.
+    async function ensureTranslator(sourceLanguage, targetLanguage) {
+      const key = sourceLanguage + '->' + targetLanguage;
+      if (translator && translatorKey === key) return translator;
+      if (translator) {
+        translator.destroy();
+        translator = null;
+        translatorKey = '';
+      }
+
+      const status = await Translator.availability({ sourceLanguage, targetLanguage });
+      if (status === 'unavailable') {
+        throw new DOMException('No language pack for ' + sourceLanguage + ' → ' + targetLanguage + '.', 'NotSupportedError');
+      }
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      setStatus('Preparing ' + langName(sourceLanguage) + ' → ' + langName(targetLanguage) + '…', 'warn');
+
+      translator = await Translator.create({
+        sourceLanguage,
+        targetLanguage,
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction
+            setStatus('Downloading the ' + sourceLanguage + '→' + targetLanguage + ' pack… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+      translatorKey = key;
+      dlEl.hidden = true;
+      return translator;
+    }
+
+    async function runTranslate() {
+      const text = sourceEl.value.trim();
+      if (!text || busy) return;
+
+      const sourceLanguage = sourceLangEl.value;
+      const targetLanguage = targetLangEl.value;
+      if (sourceLanguage === targetLanguage) {
+        setStatus('Source and target are the same language — nothing to translate.', 'warn');
+        return;
+      }
+
+      busy = true;
+      detectBtn.disabled = true;
+      translateBtn.disabled = true;
+      outputEl.textContent = '';
+
+      try {
+        const t = await ensureTranslator(sourceLanguage, targetLanguage);
+        setStatus('Translating ' + langName(sourceLanguage) + ' → ' + langName(targetLanguage) + '…', 'warn');
+
+        // Stream deltas and append them — never replace.
+        const stream = t.translateStreaming(text);
+        for await (const chunk of stream) {
+          outputEl.textContent += chunk;
+        }
+        setStatus('Done. Everything ran on-device.', 'ok');
+      } catch (e) {
+        if (errName(e) === 'NotSupportedError') {
+          outputEl.textContent =
+            'That language pair is unavailable on this device. Try another target, or fall back to a cloud translator.';
+        } else if (errName(e) === 'AbortError') {
+          outputEl.textContent = 'Translation was cancelled.';
+        } else {
+          outputEl.textContent = 'Error: ' + errMessage(e);
+        }
+        setStatus('Error: ' + errName(e) + '.', 'err');
+      } finally {
+        busy = false;
+        detectBtn.disabled = false;
+        translateBtn.disabled = false;
+      }
+    }
+
+    detectBtn.addEventListener('click', runDetect);
+    translateBtn.addEventListener('click', runTranslate);
+
+    // Free both models on teardown so they don't pin memory.
+    window.addEventListener('beforeunload', () => {
+      if (detector) detector.destroy();
+      if (translator) translator.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>

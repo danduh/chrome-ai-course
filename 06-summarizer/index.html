@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Summarizer API — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text], select { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; background: transparent; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .row .col { flex: 1 1 8rem; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    .quota { font-size: .9rem; opacity: .8; margin: .5rem 0; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>The Summarizer API — on-device summaries</h1>
+  <p>Compress text with Chrome's built-in <code>Summarizer</code> (Gemini Nano),
+    running on-device. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/summarizer">The Summarizer API</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <div class="field">
+    <label for="source">Text to summarize</label>
+    <textarea id="source" rows="8">Chrome's built-in AI ships Gemini Nano, a small language model, directly inside the browser. The model runs on the user's own device, so inference never leaves the machine: there is no backend to operate, no API key to rotate, and no per-token bill to watch. For a whole category of features that used to require a server round-trip, the cost, the latency, and the data-egress risk all drop toward zero.
+
+The trade-offs are real, though. The model is a one-time multi-gigabyte download that blocks the very first create() call until it finishes, so any serious feature has to show download progress instead of freezing on a dead button. Built-in AI is desktop-only today — no Android, no iOS, no ChromeOS — and it is hardware-dependent, so a machine under the bar simply reports the API as unavailable and stays there.
+
+The practical guidance most teams land on is to pick the tool for the job. Use the on-device model for the large share of tasks that don't need frontier-scale reasoning — summarizing, drafting, classifying, translating — and reserve a cloud model for the genuinely hard remainder. Most teams badly overestimate how often that remainder actually shows up in their product.</textarea>
+  </div>
+
+  <div class="field row">
+    <div class="col">
+      <label for="type">type</label>
+      <select id="type">
+        <option value="key-points" selected>key-points</option>
+        <option value="tl;dr">tl;dr</option>
+        <option value="teaser">teaser</option>
+        <option value="headline">headline</option>
+      </select>
+    </div>
+    <div class="col">
+      <label for="format">format</label>
+      <select id="format">
+        <option value="markdown" selected>markdown</option>
+        <option value="plain-text">plain-text</option>
+      </select>
+    </div>
+    <div class="col">
+      <label for="length">length</label>
+      <select id="length">
+        <option value="short">short</option>
+        <option value="medium" selected>medium</option>
+        <option value="long">long</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="shared">sharedContext (optional) — the frame every summary is written in</label>
+    <input type="text" id="shared" placeholder="e.g. A section of developer documentation. Keep API names exact." />
+  </div>
+
+  <div class="actions">
+    <button id="run" disabled>Summarize</button>
+  </div>
+
+  <div id="quota" class="quota" aria-live="polite"></div>
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `Summarizer` global.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/summarizer';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/summary/summary-demo';
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const sourceEl = document.getElementById('source');
+    const typeEl = document.getElementById('type');
+    const formatEl = document.getElementById('format');
+    const lengthEl = document.getElementById('length');
+    const sharedEl = document.getElementById('shared');
+    const runBtn = document.getElementById('run');
+    const quotaEl = document.getElementById('quota');
+    const outputEl = document.getElementById('output');
+
+    let summarizer = null;
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      runBtn.disabled = true;
+    }
+
+    // Feature-detect + availability() gate before anything else.
+    async function init() {
+      if (typeof Summarizer === 'undefined') {
+        degrade('This browser has no built-in <code>Summarizer</code>. You need desktop Chrome with built-in AI.');
+        return;
+      }
+
+      let status;
+      try {
+        status = await Summarizer.availability();
+      } catch (e) {
+        degrade('<code>availability()</code> threw: ' + (e && e.message ? e.message : e) + '.');
+        return;
+      }
+
+      if (status === 'unavailable') {
+        degrade('Built-in AI reports <code>unavailable</code> on this device.');
+        return;
+      }
+
+      if (status === 'available') {
+        setStatus('Model ready. Pick a type and hit Summarize.', 'ok');
+      } else {
+        setStatus('Model needs a one-time download (a few GB). It starts on your first summary.', 'warn');
+      }
+      runBtn.disabled = false;
+    }
+
+    // Build a fresh summarizer for the current options, wiring a download monitor.
+    async function createSummarizer() {
+      const options = {
+        type: typeEl.value,      // 'key-points' | 'tl;dr' | 'teaser' | 'headline'
+        format: formatEl.value,  // 'markdown' | 'plain-text'
+        length: lengthEl.value,  // 'short' | 'medium' | 'long'
+      };
+      const shared = sharedEl.value.trim();
+      if (shared) options.sharedContext = shared;
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      setStatus('Preparing the model…', 'warn');
+
+      const created = await Summarizer.create({
+        ...options,
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+
+      dlEl.hidden = true;
+      return created;
+    }
+
+    // Optional: show how much of the input budget this text costs.
+    async function showQuota(instance, text) {
+      quotaEl.textContent = '';
+      if (typeof instance.measureInputUsage !== 'function') return;
+      try {
+        const usage = await instance.measureInputUsage(text);
+        const quota = instance.inputQuota;
+        quotaEl.textContent = quota
+          ? usage + ' / ' + quota + ' input tokens'
+          : usage + ' input tokens';
+      } catch {
+        // measureInputUsage present but threw — skip the readout.
+      }
+    }
+
+    async function run() {
+      const text = sourceEl.value.trim();
+      if (!text || busy) return;
+
+      busy = true;
+      runBtn.disabled = true;
+      outputEl.textContent = '';
+      quotaEl.textContent = '';
+
+      try {
+        // Options may have changed since the last run — recreate, don't leak.
+        if (summarizer) {
+          summarizer.destroy();
+          summarizer = null;
+        }
+        summarizer = await createSummarizer();
+
+        await showQuota(summarizer, text);
+
+        setStatus('Summarizing…', 'warn');
+        const stream = summarizer.summarizeStreaming(text);
+        for await (const chunk of stream) {
+          outputEl.textContent += chunk; // deltas — append, never replace
+        }
+        setStatus('Done. Change the type or length and run it again.', 'ok');
+      } catch (e) {
+        const name = e && e.name ? e.name : 'Error';
+        if (name === 'QuotaExceededError') {
+          outputEl.textContent =
+            'Input is over the quota (QuotaExceededError). Trim the text, or split it into ' +
+            'sections and summarize each, then summarize the summaries.';
+        } else if (name === 'NotSupportedError') {
+          outputEl.textContent =
+            'That type/format/length combo is not supported here (NotSupportedError). Try another.';
+        } else if (name === 'InvalidStateError') {
+          outputEl.textContent = 'That summarizer was destroyed. Run again to recreate it.';
+          summarizer = null;
+        } else {
+          outputEl.textContent = 'Error: ' + (e && e.message ? e.message : name);
+        }
+        setStatus('Error: ' + name + '.', 'err');
+      } finally {
+        busy = false;
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener('click', run);
+
+    // Free GPU memory on teardown.
+    window.addEventListener('beforeunload', () => {
+      if (summarizer) summarizer.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>
