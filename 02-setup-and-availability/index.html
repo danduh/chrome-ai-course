@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Setup &amp; the availability lifecycle — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text] { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; }
+    .params { font-size: .85rem; opacity: .8; margin: .5rem 0; min-height: 1.2em; }
+    .badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .8rem; padding: .1em .45em; border-radius: 99px; border: 1px solid #8886; }
+  </style>
+</head>
+<body>
+  <h1>Check your setup — Chrome Built-in AI</h1>
+  <p>
+    Feature-detect <code>LanguageModel</code>, read its <code>availability()</code>
+    state, download Gemini Nano if needed, then run one prompt to prove it works.
+    Part of
+    <a href="https://danduh.me/courses/chrome-built-in-ai/setup-and-availability">Setup &amp; the availability lifecycle</a>.
+  </p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <div id="params" class="params" aria-live="polite"></div>
+
+  <div id="progress-wrap" hidden>
+    <label for="progress">Downloading Gemini Nano…</label>
+    <progress id="progress" max="1" value="0"></progress>
+  </div>
+
+  <div class="actions">
+    <button id="download" hidden>Download the model</button>
+    <button id="run" hidden>Run a test prompt</button>
+    <button id="recheck">Re-check</button>
+  </div>
+
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
+    // Pattern: feature-detect -> availability() -> create() (monitor +
+    //          outputLanguage:'en') -> prompt() -> destroy().
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_URL = 'https://windowai.danduh.me/status';
+
+    const statusEl = document.getElementById('status');
+    const paramsEl = document.getElementById('params');
+    const progressWrap = document.getElementById('progress-wrap');
+    const progressEl = document.getElementById('progress');
+    const downloadBtn = document.getElementById('download');
+    const runBtn = document.getElementById('run');
+    const recheckBtn = document.getElementById('recheck');
+    const outputEl = document.getElementById('output');
+
+    let session = null;
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    // The unavailable / no-global path: never throw into a blank page.
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + LESSON_URL + '">Setup &amp; the availability lifecycle</a>, ' +
+          'or check your browser live at <a href="' + LIVE_URL + '">windowai.danduh.me/status</a>.',
+        'err'
+      );
+      downloadBtn.hidden = true;
+      runBtn.hidden = true;
+      progressWrap.hidden = true;
+    }
+
+    // Show LanguageModel.params() when the runtime exposes it (feature-detected).
+    async function showParams() {
+      if (typeof LanguageModel === 'undefined') { paramsEl.textContent = ''; return; }
+      if (typeof LanguageModel.params !== 'function') {
+        paramsEl.textContent = 'LanguageModel.params() is not exposed on this build.';
+        return;
+      }
+      try {
+        const p = await LanguageModel.params();
+        if (p) {
+          paramsEl.innerHTML =
+            'params(): defaultTopK <code>' + p.defaultTopK + '</code>, maxTopK <code>' + p.maxTopK +
+            '</code>, defaultTemperature <code>' + p.defaultTemperature + '</code>, maxTemperature <code>' +
+            p.maxTemperature + '</code>';
+        }
+      } catch (e) {
+        paramsEl.textContent = 'params() is present but threw: ' + errName(e) + '.';
+      }
+    }
+
+    // Feature-detect + availability() gate, then map each of the four states to UI.
+    async function init() {
+      outputEl.textContent = '';
+      downloadBtn.hidden = true;
+      runBtn.hidden = true;
+
+      if (typeof LanguageModel === 'undefined') {
+        degrade('This browser has no built-in <code>LanguageModel</code>. You need desktop Chrome over https or localhost.');
+        return;
+      }
+
+      await showParams();
+
+      let state;
+      try {
+        // "unavailable" | "downloadable" | "downloading" | "available"
+        state = await LanguageModel.availability({ outputLanguage: 'en' });
+      } catch (e) {
+        degrade('<code>availability()</code> threw: ' + errName(e) + '.');
+        return;
+      }
+
+      setStatus('availability() reports <span class="badge">' + state + '</span>. ' + guidance(state),
+        state === 'available' ? 'ok' : state === 'unavailable' ? 'err' : 'warn');
+
+      if (state === 'unavailable') {
+        degrade('Gemini Nano is <span class="badge">unavailable</span> here — under the hardware bar, switched off in Settings &rarr; System, or this page is on http://.');
+        return;
+      }
+
+      if (state === 'available') {
+        // Already on disk: prove it with a prompt.
+        runBtn.hidden = false;
+      } else {
+        // "downloadable" / "downloading": first create() fetches the model.
+        downloadBtn.hidden = false;
+      }
+    }
+
+    function guidance(state) {
+      if (state === 'available') return 'The model is on disk. Click "Run a test prompt".';
+      if (state === 'downloadable') return 'Supported, but the model is not on disk yet. Click "Download the model" (~4 GB, one time).';
+      if (state === 'downloading') return 'The model is already downloading. Click "Download the model" to attach and watch progress.';
+      return '';
+    }
+
+    // Create the session lazily, wiring the download monitor for the first run.
+    async function ensureSession() {
+      if (session) return session;
+
+      progressWrap.hidden = false;
+      progressEl.value = 0;
+      setStatus('Preparing Gemini Nano…', 'warn');
+
+      session = await LanguageModel.create({
+        outputLanguage: 'en', // always — this is load-bearing
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            // e.loaded is a 0..1 fraction — there is no e.total in current builds.
+            progressEl.value = e.loaded;
+            setStatus('Downloading Gemini Nano… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+
+      progressWrap.hidden = true;
+      return session;
+    }
+
+    async function download() {
+      if (busy) return;
+      busy = true;
+      downloadBtn.disabled = true;
+      recheckBtn.disabled = true;
+      try {
+        await ensureSession();
+        setStatus('Model ready. Click "Run a test prompt" to prove it works.', 'ok');
+        downloadBtn.hidden = true;
+        runBtn.hidden = false;
+      } catch (e) {
+        setStatus('Download failed: ' + errName(e) + '. ' + errMessage(e), 'err');
+      } finally {
+        busy = false;
+        downloadBtn.disabled = false;
+        recheckBtn.disabled = false;
+      }
+    }
+
+    async function runTest() {
+      if (busy) return;
+      busy = true;
+      runBtn.disabled = true;
+      recheckBtn.disabled = true;
+      outputEl.textContent = '';
+      setStatus('Running a one-word test prompt…', 'warn');
+
+      try {
+        const s = await ensureSession();
+        const reply = await s.prompt('Reply with the single word: ready');
+        outputEl.textContent = reply;
+        setStatus('Round trip works. Gemini Nano answered on-device.', 'ok');
+      } catch (e) {
+        outputEl.textContent = 'Error: ' + errMessage(e);
+        setStatus('Prompt failed: ' + errName(e) + '.', 'err');
+      } finally {
+        busy = false;
+        runBtn.disabled = false;
+        recheckBtn.disabled = false;
+      }
+    }
+
+    // Re-check availability without tearing down a working session.
+    async function recheck() {
+      if (busy) return;
+      setStatus('Re-checking availability…', 'warn');
+      await init();
+    }
+
+    function errName(e) { return e && e.name ? e.name : 'Error'; }
+    function errMessage(e) { return e && e.message ? e.message : String(e); }
+
+    downloadBtn.addEventListener('click', download);
+    runBtn.addEventListener('click', runTest);
+    recheckBtn.addEventListener('click', recheck);
+
+    // Free GPU memory on teardown.
+    window.addEventListener('beforeunload', () => {
+      if (session) session.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>

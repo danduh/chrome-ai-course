@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Structured output &amp; tool calling — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text] { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    section { border: 1px solid #8883; border-radius: .6rem; padding: .25rem 1rem 1rem; margin: 1rem 0; }
+    .chip { display: inline-block; padding: .1rem .55rem; border-radius: 1rem;
+      border: 1px solid #8886; font-size: .85rem; }
+    .chip.positive { border-color: #2a7; } .chip.neutral { border-color: #99a; }
+    .chip.negative { border-color: #d44; }
+    .kv { margin: .4rem 0; } .kv b { font-weight: 600; }
+    .tags { display: flex; gap: .4rem; flex-wrap: wrap; margin: .25rem 0; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem;
+      background: #8881; border-radius: .5rem; padding: .5rem .75rem; margin: .5rem 0;
+      min-height: 2rem; white-space: pre-wrap; }
+    .log .step { padding: .15rem 0; border-bottom: 1px dashed #8883; }
+    .log .step:last-child { border-bottom: 0; }
+    .muted { opacity: .7; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>Structured output &amp; tool calling</h1>
+  <p>Two things the Prompt API does beyond chat, on-device against Chrome's
+    built-in <code>LanguageModel</code> (Gemini Nano): force JSON with a schema,
+    and drive local tools with an intent loop. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/structured-output-and-tools">Structured output &amp; tool calling</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <!-- Part A: structured output -->
+  <section>
+    <h2>1 · Structured output</h2>
+    <p class="muted">Paste some text; the model returns
+      <code>{ sentiment, topics, summary }</code> constrained by a JSON Schema.</p>
+    <div class="field">
+      <label for="review">Text to analyse</label>
+      <textarea id="review" rows="4">The checkout was fast and the app finally stopped crashing, but support took three days to reply and the new pricing is confusing.</textarea>
+    </div>
+    <div class="actions">
+      <button id="extractBtn" disabled>Extract</button>
+    </div>
+    <div id="extractOut" class="output" aria-live="polite"></div>
+  </section>
+
+  <!-- Part B: tool calling via the intent loop -->
+  <section>
+    <h2>2 · Tool calling (intent loop)</h2>
+    <p class="muted">Ask something that needs the local tools
+      <code>getWeather(city)</code> and <code>calculate(expression)</code>. The
+      loop runs each tool in JavaScript and logs every step.</p>
+    <div class="field">
+      <label for="question">Your question</label>
+      <input type="text" id="question"
+        value="What is 15% of 240, and should I bring an umbrella in London?" />
+    </div>
+    <div class="actions">
+      <button id="runBtn" disabled>Run</button>
+    </div>
+    <div class="muted">Tool-call log</div>
+    <div id="log" class="log" aria-live="polite"></div>
+    <div class="muted">Final reply</div>
+    <div id="reply" class="output" aria-live="polite"></div>
+  </section>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/structured-output-and-tools';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/tool-calling/tool-calling-demo';
+    const MAX_STEPS = 8;
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const reviewEl = document.getElementById('review');
+    const extractBtn = document.getElementById('extractBtn');
+    const extractOut = document.getElementById('extractOut');
+    const questionEl = document.getElementById('question');
+    const runBtn = document.getElementById('runBtn');
+    const logEl = document.getElementById('log');
+    const replyEl = document.getElementById('reply');
+
+    let extractSession = null;
+    let toolSession = null;
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      extractBtn.disabled = true;
+      runBtn.disabled = true;
+    }
+
+    // --- The JSON Schemas that constrain each part -------------------------
+    const EXTRACT_SCHEMA = {
+      type: 'object',
+      properties: {
+        sentiment: { type: 'string', enum: ['positive', 'neutral', 'negative'] },
+        topics: { type: 'array', items: { type: 'string' } },
+        summary: { type: 'string' },
+      },
+      required: ['sentiment', 'topics', 'summary'],
+    };
+
+    const INTENT_SCHEMA = {
+      type: 'object',
+      required: ['toolName'],
+      additionalProperties: false,
+      properties: {
+        toolName: { type: 'string', description: 'Tool to call next, or "done" to reply.' },
+        args: { type: 'object', description: 'Arguments object for the tool.' },
+        reply: { type: 'string', description: 'Final answer — only when toolName is "done".' },
+      },
+    };
+
+    // --- Local tools. Each takes an args object and returns a STRING. ------
+    const TOOLS = {
+      getWeather({ city }) {
+        const key = String(city == null ? '' : city).trim().toLowerCase();
+        const table = {
+          'tel aviv': { tempC: 29, sky: 'sunny' },
+          'london': { tempC: 14, sky: 'light rain' },
+          'tokyo': { tempC: 22, sky: 'cloudy' },
+          'new york': { tempC: 18, sky: 'clear' },
+          'berlin': { tempC: 12, sky: 'overcast' },
+        };
+        const hit = table[key] || { tempC: 20, sky: 'clear' };
+        return JSON.stringify({ city: city || 'unknown', tempC: hit.tempC, sky: hit.sky });
+      },
+      calculate({ expression }) {
+        // Demo-only evaluator: whitelist digits and arithmetic, then eval.
+        const safe = String(expression == null ? '' : expression).replace(/[^0-9+\-*/().\s]/g, '');
+        if (!safe.trim()) return JSON.stringify({ error: 'empty expression' });
+        try {
+          const result = Function('"use strict"; return (' + safe + ');')();
+          return JSON.stringify({ expression, result });
+        } catch (e) {
+          return JSON.stringify({ error: 'invalid expression' });
+        }
+      },
+    };
+
+    const TOOL_SYSTEM = [
+      'You are a small assistant that answers by calling tools.',
+      'Emit ONE JSON object per turn and nothing else — no prose, no code fences.',
+      '',
+      'Tools you can call:',
+      '- getWeather — args: { "city": string }. Current weather for a city.',
+      '- calculate — args: { "expression": string }. Evaluate an arithmetic expression (convert percentages to multiplication, e.g. 15% of 240 -> 0.15 * 240).',
+      '',
+      'Call ONE tool per turn. After you receive its result, either call another tool or finish.',
+      'When you can answer, emit { "toolName": "done", "reply": "<your answer>" }.',
+    ].join('\n');
+
+    // --- Fence-stripping JSON parse. Even with responseFormat some builds ---
+    // wrap JSON in a fenced block; peel it off before parsing. 3 tiers:
+    // direct parse -> strip a ```json ... ``` fence -> extract the first { ... }.
+    function parseJson(text) {
+      const s = String(text == null ? '' : text).trim();
+      try { return JSON.parse(s); } catch (e) { /* fall through */ }
+      const fenced = s.match(/^`{3}(?:json)?\s*\n?([\s\S]*?)\n?`{3}$/);
+      if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch (e) { /* fall through */ } }
+      const braces = s.match(/\{[\s\S]*\}/);
+      if (braces) { try { return JSON.parse(braces[0]); } catch (e) { /* give up */ } }
+      return null;
+    }
+
+    // --- Session creation: always outputLanguage:'en' + a download monitor. -
+    async function createSession(opts) {
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      const session = await LanguageModel.create(Object.assign({}, opts, {
+        outputLanguage: 'en', // always — this is load-bearing
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      }));
+      dlEl.hidden = true;
+      return session;
+    }
+
+    async function getExtractSession() {
+      if (!extractSession) {
+        extractSession = await createSession({
+          initialPrompts: [
+            { role: 'system', content: 'You extract structured data from short text. Reply with JSON only.' },
+          ],
+        });
+      }
+      return extractSession;
+    }
+
+    async function getToolSession() {
+      if (!toolSession) {
+        toolSession = await createSession({
+          responseFormat: INTENT_SCHEMA,
+          initialPrompts: [{ role: 'system', content: TOOL_SYSTEM }],
+        });
+      }
+      return toolSession;
+    }
+
+    // --- Part A: constrain -> parse -> render ------------------------------
+    async function runExtract() {
+      const text = reviewEl.value.trim();
+      if (!text || busy) return;
+      busy = true;
+      extractBtn.disabled = true;
+      extractOut.textContent = '';
+      setStatus('Extracting…', 'warn');
+      try {
+        const session = await getExtractSession();
+        const raw = await session.prompt(
+          'Extract the sentiment, the main topics, and a one-line summary of this text:\n\n' + text,
+          { responseFormat: EXTRACT_SCHEMA }
+        );
+        const data = parseJson(raw);
+        if (!data || typeof data.sentiment !== 'string') {
+          extractOut.textContent = 'Could not parse a result. Raw output:\n\n' + raw;
+          setStatus('Parse failed — see the raw output.', 'warn');
+        } else {
+          renderExtraction(data);
+          setStatus('Done.', 'ok');
+        }
+      } catch (e) {
+        extractOut.textContent = 'Error: ' + (e && e.message ? e.message : e);
+        setStatus('Error: ' + (e && e.name ? e.name : 'Error') + '.', 'err');
+      } finally {
+        busy = false;
+        extractBtn.disabled = false;
+      }
+    }
+
+    function renderExtraction(data) {
+      extractOut.textContent = '';
+      const sentiment = document.createElement('div');
+      sentiment.className = 'kv';
+      const label = document.createElement('b');
+      label.textContent = 'sentiment: ';
+      const chip = document.createElement('span');
+      const kind = ['positive', 'neutral', 'negative'].includes(data.sentiment) ? data.sentiment : 'neutral';
+      chip.className = 'chip ' + kind;
+      chip.textContent = data.sentiment;
+      sentiment.appendChild(label);
+      sentiment.appendChild(chip);
+
+      const topics = document.createElement('div');
+      topics.className = 'kv';
+      const tLabel = document.createElement('b');
+      tLabel.textContent = 'topics: ';
+      topics.appendChild(tLabel);
+      const tags = document.createElement('span');
+      tags.className = 'tags';
+      (Array.isArray(data.topics) ? data.topics : []).forEach((t) => {
+        const tag = document.createElement('span');
+        tag.className = 'chip';
+        tag.textContent = String(t);
+        tags.appendChild(tag);
+      });
+      topics.appendChild(tags);
+
+      const summary = document.createElement('div');
+      summary.className = 'kv';
+      const sLabel = document.createElement('b');
+      sLabel.textContent = 'summary: ';
+      summary.appendChild(sLabel);
+      summary.appendChild(document.createTextNode(String(data.summary || '')));
+
+      extractOut.appendChild(sentiment);
+      extractOut.appendChild(topics);
+      extractOut.appendChild(summary);
+    }
+
+    // --- Part B: the intent loop -------------------------------------------
+    async function runAgent() {
+      const question = questionEl.value.trim();
+      if (!question || busy) return;
+      busy = true;
+      runBtn.disabled = true;
+      logEl.textContent = '';
+      replyEl.textContent = '';
+      setStatus('Thinking…', 'warn');
+      try {
+        const session = await getToolSession();
+        let next = question;
+        let finished = false;
+
+        for (let i = 0; i < MAX_STEPS; i++) {
+          const raw = await session.prompt(next);
+          const step = parseJson(raw);
+
+          if (!step || typeof step.toolName !== 'string') {
+            logStep(i + 1, '(parse failed)', {}, raw);
+            replyEl.textContent = raw;
+            finished = true;
+            break;
+          }
+
+          if (step.toolName === 'done') {
+            replyEl.textContent = step.reply || '(no reply)';
+            finished = true;
+            break;
+          }
+
+          const args = (step.args && typeof step.args === 'object') ? step.args : {};
+          const tool = TOOLS[step.toolName];
+          const result = tool
+            ? tool(args)
+            : JSON.stringify({ error: 'unknown tool "' + step.toolName + '"' });
+
+          logStep(i + 1, step.toolName, args, result);
+
+          next = 'Result of ' + step.toolName + '(' + JSON.stringify(args) + '): ' + result +
+            '. Now call the next tool, or emit {"toolName":"done","reply":"..."}.';
+        }
+
+        if (!finished) {
+          replyEl.textContent = 'Stopped after ' + MAX_STEPS + ' steps without a final reply.';
+        }
+        setStatus('Done.', 'ok');
+      } catch (e) {
+        replyEl.textContent = 'Error: ' + (e && e.message ? e.message : e);
+        setStatus('Error: ' + (e && e.name ? e.name : 'Error') + '.', 'err');
+      } finally {
+        busy = false;
+        runBtn.disabled = false;
+      }
+    }
+
+    function logStep(n, toolName, args, result) {
+      const row = document.createElement('div');
+      row.className = 'step';
+      row.textContent = '#' + n + '  ' + toolName + '(' + JSON.stringify(args) + ')  →  ' + result;
+      logEl.appendChild(row);
+    }
+
+    // --- Feature-detect + availability() gate before anything else. --------
+    async function init() {
+      if (typeof LanguageModel === 'undefined') {
+        degrade('This browser has no built-in <code>LanguageModel</code>. You need desktop Chrome with built-in AI.');
+        return;
+      }
+      let status;
+      try {
+        status = await LanguageModel.availability();
+      } catch (e) {
+        degrade('<code>availability()</code> threw: ' + (e && e.message ? e.message : e) + '.');
+        return;
+      }
+      if (status === 'unavailable') {
+        degrade('Built-in AI reports <code>unavailable</code> on this device.');
+        return;
+      }
+      if (status === 'available') {
+        setStatus('Model ready. Try Extract, then Run.', 'ok');
+      } else {
+        setStatus('Model needs a one-time download (a few GB). It starts on your first Extract or Run.', 'warn');
+      }
+      extractBtn.disabled = false;
+      runBtn.disabled = false;
+    }
+
+    extractBtn.addEventListener('click', runExtract);
+    runBtn.addEventListener('click', runAgent);
+
+    // Free GPU memory on teardown.
+    window.addEventListener('beforeunload', () => {
+      if (extractSession) extractSession.destroy();
+      if (toolSession) toolSession.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>

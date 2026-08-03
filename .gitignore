@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Node (only if you use `npx serve` / a local toolchain)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# TypeScript build output (demo.ts is reference-only; don't commit compiled JS)
+*.tsbuildinfo
+demo.js

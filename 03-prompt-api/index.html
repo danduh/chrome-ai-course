@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Prompt API (LanguageModel) — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text], input[type=number] { font: inherit; width: 100%;
+      box-sizing: border-box; padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    label { display: block; font-size: .85rem; margin-bottom: .25rem; opacity: .85; }
+    .field { margin: .75rem 0; }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: flex-end; }
+    .row .num { flex: 0 0 8rem; }
+    .actions { display: flex; gap: .5rem; margin: .75rem 0; }
+    .tokens { font-size: .9rem; opacity: .8; margin: .5rem 0; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>The Prompt API — on-device chat</h1>
+  <p>A minimal chat against Chrome's built-in <code>LanguageModel</code> (Gemini
+    Nano), running on-device. Lesson:
+    <a href="https://danduh.me/courses/chrome-built-in-ai/prompt-api">The Prompt API (LanguageModel)</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+  <progress id="dl" max="1" hidden></progress>
+
+  <div class="field">
+    <label for="system">System prompt</label>
+    <input type="text" id="system" value="You are a concise, friendly assistant." />
+  </div>
+
+  <div class="field row">
+    <div class="num">
+      <label for="temp">temperature</label>
+      <input type="number" id="temp" step="0.1" min="0" value="1" />
+    </div>
+    <div class="num">
+      <label for="topk">topK</label>
+      <input type="number" id="topk" step="1" min="1" value="3" />
+    </div>
+    <span id="paramNote" style="font-size:.8rem;opacity:.7;">defaults from <code>params()</code></span>
+  </div>
+
+  <div class="field">
+    <label for="prompt">Your prompt</label>
+    <textarea id="prompt" rows="3" placeholder="Ask something… (Ctrl/Cmd+Enter to send)"></textarea>
+  </div>
+
+  <div class="actions">
+    <button id="send" disabled>Send</button>
+    <button id="reset" disabled title="Destroy the session and start a fresh conversation with the current settings">Reset session</button>
+  </div>
+
+  <div id="tokens" class="tokens" aria-live="polite"></div>
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
+    const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/prompt-api';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_DEMO_URL = 'https://windowai.danduh.me/chat/chat-demo';
+    const DEFAULT_SYSTEM = 'You are a concise, friendly assistant.';
+
+    const statusEl = document.getElementById('status');
+    const dlEl = document.getElementById('dl');
+    const systemEl = document.getElementById('system');
+    const tempEl = document.getElementById('temp');
+    const topkEl = document.getElementById('topk');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('send');
+    const resetBtn = document.getElementById('reset');
+    const tokensEl = document.getElementById('tokens');
+    const outputEl = document.getElementById('output');
+
+    let session = null;
+    let busy = false;
+
+    function setStatus(html, kind) {
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      statusEl.innerHTML = html;
+    }
+
+    function degrade(reason) {
+      setStatus(
+        reason +
+          ' Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
+        'err'
+      );
+      sendBtn.disabled = true;
+      resetBtn.disabled = true;
+    }
+
+    function updateTokens() {
+      if (session) {
+        tokensEl.textContent = session.inputUsage + ' / ' + session.inputQuota + ' input tokens';
+      }
+    }
+
+    // Feature-detect + availability() gate before anything else.
+    async function init() {
+      if (typeof LanguageModel === 'undefined') {
+        degrade('This browser has no built-in <code>LanguageModel</code>. You need desktop Chrome with built-in AI.');
+        return;
+      }
+
+      let status;
+      try {
+        status = await LanguageModel.availability();
+      } catch (e) {
+        degrade('<code>availability()</code> threw: ' + (e && e.message ? e.message : e) + '.');
+        return;
+      }
+
+      if (status === 'unavailable') {
+        degrade('Built-in AI reports <code>unavailable</code> on this device.');
+        return;
+      }
+
+      // Seed temperature/topK from params() when the runtime exposes it.
+      if (typeof LanguageModel.params === 'function') {
+        try {
+          const params = await LanguageModel.params();
+          if (params) {
+            if (typeof params.defaultTemperature === 'number') {
+              tempEl.value = params.defaultTemperature;
+              if (typeof params.maxTemperature === 'number') tempEl.max = params.maxTemperature;
+            }
+            if (typeof params.defaultTopK === 'number') {
+              topkEl.value = params.defaultTopK;
+              if (typeof params.maxTopK === 'number') topkEl.max = params.maxTopK;
+            }
+          }
+        } catch {
+          // params() present but threw — keep the input defaults.
+        }
+      } else {
+        document.getElementById('paramNote').textContent = 'params() not exposed — using safe defaults';
+      }
+
+      if (status === 'available') {
+        setStatus('Model ready. Type a prompt and hit Send.', 'ok');
+      } else {
+        setStatus('Model needs a one-time download (a few GB). It starts on your first prompt.', 'warn');
+      }
+      sendBtn.disabled = false;
+      resetBtn.disabled = false;
+    }
+
+    // Create the session lazily, wiring a download monitor for the first run.
+    async function ensureSession() {
+      if (session) return session;
+
+      const systemText = systemEl.value.trim() || DEFAULT_SYSTEM;
+      const temperature = Number(tempEl.value);
+      const topK = Number(topkEl.value);
+
+      dlEl.hidden = false;
+      dlEl.value = 0;
+      setStatus('Preparing the model…', 'warn');
+
+      session = await LanguageModel.create({
+        outputLanguage: 'en', // always — this is load-bearing
+        temperature: Number.isFinite(temperature) ? temperature : undefined,
+        topK: Number.isFinite(topK) ? topK : undefined,
+        initialPrompts: [{ role: 'system', content: systemText }],
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
+
+      dlEl.hidden = true;
+      setStatus('Model ready.', 'ok');
+      return session;
+    }
+
+    async function send() {
+      const text = promptEl.value.trim();
+      if (!text || busy) return;
+
+      busy = true;
+      sendBtn.disabled = true;
+      resetBtn.disabled = true;
+      outputEl.textContent = '';
+
+      try {
+        const s = await ensureSession();
+        const stream = s.promptStreaming(text);
+        for await (const chunk of stream) {
+          outputEl.textContent += chunk; // deltas — append, never replace
+        }
+        updateTokens();
+        setStatus('Done. Ask a follow-up, or Reset to start over.', 'ok');
+      } catch (e) {
+        const name = e && e.name ? e.name : 'Error';
+        if (name === 'QuotaExceededError') {
+          outputEl.textContent =
+            'Context window is full (QuotaExceededError). Reset the session, then try a shorter prompt.';
+        } else if (name === 'InvalidStateError') {
+          outputEl.textContent = 'That session was destroyed. Resetting…';
+          session = null;
+        } else {
+          outputEl.textContent = 'Error: ' + (e && e.message ? e.message : name);
+        }
+        setStatus('Error: ' + name + '.', 'err');
+      } finally {
+        busy = false;
+        sendBtn.disabled = false;
+        resetBtn.disabled = false;
+      }
+    }
+
+    // Reset = destroy + recreate with the current system prompt / temperature / topK.
+    async function reset() {
+      if (busy) return;
+      if (session) {
+        session.destroy();
+        session = null;
+      }
+      outputEl.textContent = '';
+      tokensEl.textContent = '';
+      try {
+        await ensureSession();
+        updateTokens();
+        setStatus('Session reset with the current settings. History cleared.', 'ok');
+      } catch (e) {
+        setStatus('Could not recreate the session: ' + (e && e.name ? e.name : e) + '.', 'err');
+      }
+    }
+
+    sendBtn.addEventListener('click', send);
+    resetBtn.addEventListener('click', reset);
+    promptEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') send();
+    });
+
+    // Free GPU memory on teardown.
+    window.addEventListener('beforeunload', () => {
+      if (session) session.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>

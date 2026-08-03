@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Introduction: AI in the browser — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text] { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+  </style>
+</head>
+<body>
+  <h1>Hello, on-device model</h1>
+  <p>
+    The smallest possible Chrome built-in AI demo: feature-detect
+    <code>LanguageModel</code>, check <code>availability()</code>, run one prompt
+    against Gemini Nano, then free the session. Part of
+    <a href="https://danduh.me/courses/chrome-built-in-ai/introduction">Introduction: AI in the browser</a>.
+  </p>
+
+  <div id="status" class="status">Checking availability…</div>
+
+  <p><button id="run" disabled>Run one prompt</button></p>
+
+  <div id="progress-wrap" hidden>
+    <label for="progress">Downloading Gemini Nano…</label>
+    <progress id="progress" max="100" value="0"></progress>
+  </div>
+
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
+    // Pattern: availability() -> create() (with monitor + outputLanguage:'en')
+    //          -> promptStreaming() -> destroy().
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const runBtn = document.getElementById('run');
+    const progressWrap = document.getElementById('progress-wrap');
+    const progressEl = document.getElementById('progress');
+
+    const PROMPT = 'In one sentence, explain on-device AI to a web developer.';
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_URL = 'https://windowai.danduh.me/';
+
+    let session = null;
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text;
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    function degrade(message) {
+      runBtn.disabled = true;
+      setStatus(message, 'err');
+      outputEl.innerHTML =
+        'Try it on the <a href="' + LIVE_URL + '">hosted demo</a>, or get set up with the ' +
+        '<a href="' + SETUP_URL + '">Setup &amp; availability</a> lesson.';
+    }
+
+    async function init() {
+      // 1) Feature-detect. The global is undefined off desktop Chrome or on http://.
+      if (typeof LanguageModel === 'undefined') {
+        degrade('Built-in AI is not available in this browser. You need desktop Chrome over https or localhost.');
+        return;
+      }
+
+      // 2) Check availability BEFORE create().
+      let status;
+      try {
+        // "unavailable" | "downloadable" | "downloading" | "available"
+        status = await LanguageModel.availability();
+      } catch (err) {
+        degrade('availability() threw: ' + err.message);
+        return;
+      }
+
+      if (status === 'unavailable') {
+        degrade('Gemini Nano is unavailable on this device (under the hardware bar, or turned off in Settings).');
+        return;
+      }
+
+      runBtn.disabled = false;
+      if (status === 'available') {
+        setStatus('Gemini Nano is ready. Click to run one prompt.', 'ok');
+      } else {
+        // "downloadable" | "downloading" — first create() will fetch the model.
+        setStatus('Model needs a one-time download (~4 GB). Click to start — progress shows below.', 'warn');
+      }
+    }
+
+    async function run() {
+      runBtn.disabled = true;
+      outputEl.textContent = '';
+      setStatus('Creating a session…', 'warn');
+
+      try {
+        // 3) create() — always pass outputLanguage:'en'. Wire a monitor so the
+        //    first-run download shows progress instead of a frozen button.
+        session = await LanguageModel.create({
+          outputLanguage: 'en',
+          monitor(m) {
+            m.addEventListener('downloadprogress', (e) => {
+              // e.loaded is a 0..1 fraction — there is no e.total in current builds.
+              const pct = Math.round(e.loaded * 100);
+              progressWrap.hidden = false;
+              progressEl.value = pct;
+              setStatus('Downloading Gemini Nano… ' + pct + '%', 'warn');
+            });
+          },
+        });
+
+        progressWrap.hidden = true;
+        setStatus('Streaming the answer…', 'ok');
+
+        // 4) Use it. Chunks are incremental deltas — append, don't replace.
+        const stream = session.promptStreaming(PROMPT);
+        for await (const chunk of stream) {
+          outputEl.textContent += chunk;
+        }
+
+        setStatus('Done. Session freed.', 'ok');
+      } catch (err) {
+        setStatus('Something went wrong: ' + err.message, 'err');
+      } finally {
+        // 5) Free the GPU memory. One-shot demo, so destroy right after.
+        if (session) {
+          session.destroy();
+          session = null;
+        }
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener('click', run);
+
+    // Defensive teardown if the tab closes mid-session.
+    window.addEventListener('beforeunload', () => {
+      if (session) session.destroy();
+    });
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Multimodal: image input — Chrome Built-in AI demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .status { padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #8884;
+      margin: 1rem 0; font-size: .95rem; }
+    .status.ok { border-color: #2a7; } .status.warn { border-color: #c93; }
+    .status.err { border-color: #d44; }
+    button { font: inherit; padding: .5rem .9rem; border-radius: .5rem;
+      border: 1px solid #8886; cursor: pointer; background: #8881; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    textarea, input[type=text] { font: inherit; width: 100%; box-sizing: border-box;
+      padding: .5rem; border-radius: .5rem; border: 1px solid #8886; }
+    pre, .output { white-space: pre-wrap; background: #8881; padding: .75rem;
+      border-radius: .5rem; min-height: 3rem; }
+    progress { width: 100%; }
+    a { color: #06c; } code { background:#8882; padding:.1em .3em; border-radius:.3em; }
+    .drop { border: 1px dashed #8886; border-radius: .5rem; padding: 1rem;
+      text-align: center; cursor: pointer; }
+    .drop.over { border-color: #2a7; background: #2a71; }
+    .drop img.preview { max-width: 100%; max-height: 240px; border-radius: .5rem;
+      margin: .75rem auto 0; display: block; }
+    .row { margin: 1rem 0; }
+    label { display: block; font-size: .9rem; margin-bottom: .25rem; }
+    .hint { font-size: .85rem; opacity: .8; }
+  </style>
+</head>
+<body>
+  <h1>Multimodal: image input</h1>
+  <p>Ask Chrome's on-device Gemini Nano about a picture — everything runs locally.
+    Part of <a href="https://danduh.me/courses/chrome-built-in-ai/multimodal">Multimodal: image input</a>.</p>
+
+  <div id="status" class="status">Checking availability…</div>
+
+  <div class="row">
+    <div id="drop" class="drop" role="button" tabindex="0"
+         aria-label="Drop an image, paste from clipboard, or click to pick a file">
+      <div class="hint">Drop an image here, paste from the clipboard, or click to pick a file.</div>
+      <img id="preview" class="preview" alt="Chosen image preview" hidden />
+    </div>
+    <input id="file" type="file" accept="image/*" hidden />
+  </div>
+
+  <div class="row">
+    <label for="question">Question</label>
+    <textarea id="question" rows="2">What is in this picture?</textarea>
+  </div>
+
+  <div class="row">
+    <button id="run" disabled>Ask about the image</button>
+  </div>
+
+  <progress id="progress" max="1" value="0" hidden></progress>
+  <div id="output" class="output" aria-live="polite"></div>
+
+  <script>
+    // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
+    // Demo: drop/paste/pick an image, downsample to 512px, then ask Gemini Nano
+    // about it and stream the answer — all on-device.
+
+    const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
+    const LIVE_URL = 'https://windowai.danduh.me/multimodal';
+
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const preview = document.getElementById('preview');
+    const question = document.getElementById('question');
+    const runBtn = document.getElementById('run');
+    const progress = document.getElementById('progress');
+
+    let sessionPromise = null;   // cached create() — one session, reused
+    let currentImage = null;     // the chosen image as a Blob
+    let currentUrl = null;       // object URL for the preview (revoked on swap)
+
+    function setStatus(msg, cls) {
+      statusEl.className = 'status' + (cls ? ' ' + cls : '');
+      statusEl.textContent = msg;
+    }
+
+    // Probe multimodal availability. Older builds throw on the option —
+    // catch it and report "unavailable" rather than exploding.
+    async function getMultimodalAvailability() {
+      if (typeof LanguageModel === 'undefined') return 'unavailable';
+      try {
+        return await LanguageModel.availability({ expectedInputs: [{ type: 'image' }] });
+      } catch {
+        return 'unavailable';
+      }
+    }
+
+    // Create once (loading the vision tower via expectedInputs), reuse after.
+    // The first create() may download the model, which blocks until it finishes.
+    function getSession() {
+      if (sessionPromise) return sessionPromise;
+      sessionPromise = LanguageModel.create({
+        expectedInputs: [{ type: 'text', languages: ['en'] }, { type: 'image' }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        outputLanguage: 'en',
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            const frac = e.loaded != null ? e.loaded : 0;
+            progress.hidden = false;
+            progress.value = frac;
+            setStatus('Downloading model… ' + Math.round(frac * 100) + '%', 'warn');
+          });
+        },
+      }).then((session) => {
+        progress.hidden = true;
+        return session;
+      }).catch((err) => {
+        sessionPromise = null;   // let the next attempt retry a failed download
+        progress.hidden = true;
+        throw err;
+      });
+      return sessionPromise;
+    }
+
+    function setImage(blob) {
+      if (!blob || !blob.type.startsWith('image/')) {
+        setStatus('That was not an image — try a PNG or JPEG.', 'warn');
+        return;
+      }
+      currentImage = blob;
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      currentUrl = URL.createObjectURL(blob);
+      preview.src = currentUrl;
+      preview.hidden = false;
+      setStatus('Image ready. Ask away.', 'ok');
+    }
+
+    // Draw the image into a canvas at max 512px on the long side, then encode
+    // back to a Blob. canvas.toBlob hands you null on failure — null-check it.
+    async function downsample(blob, max = 512) {
+      const bitmap = await createImageBitmap(blob);
+      const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (out) => (out ? resolve(out) : reject(new Error('canvas.toBlob returned null'))),
+          'image/jpeg',
+          0.9,
+        );
+      });
+    }
+
+    async function run() {
+      if (!currentImage) {
+        setStatus('Add an image first — drop, paste, or pick a file.', 'warn');
+        return;
+      }
+      const text = question.value.trim() || 'What is in this picture?';
+      runBtn.disabled = true;
+      outputEl.textContent = '';
+      try {
+        setStatus('Preparing the model…', 'warn');
+        const session = await getSession();
+        setStatus('Thinking…', 'ok');
+        const image = await downsample(currentImage, 512);
+        // Role-wrapped content parts. The image part's key is `value`.
+        const stream = session.promptStreaming([
+          {
+            role: 'user',
+            content: [
+              { type: 'text', value: text },
+              { type: 'image', value: image },
+            ],
+          },
+        ]);
+        for await (const chunk of stream) {
+          outputEl.textContent += chunk;   // chunks are deltas — append
+        }
+        setStatus('Done. Every pixel stayed on this machine.', 'ok');
+      } catch (e) {
+        setStatus('Prompt failed: ' + (e && e.message ? e.message : e), 'err');
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    // --- Image sources: file picker, drag-and-drop, clipboard paste ---
+    drop.addEventListener('click', () => fileInput.click());
+    drop.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+    });
+    fileInput.addEventListener('change', () => setImage(fileInput.files[0]));
+
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      setImage(e.dataTransfer.files[0]);
+    });
+
+    document.addEventListener('paste', (e) => {
+      for (const item of e.clipboardData.items) {
+        if (item.type.startsWith('image/')) { setImage(item.getAsFile()); return; }
+      }
+    });
+
+    runBtn.addEventListener('click', run);
+
+    function showUnavailable() {
+      setStatus("Multimodal image input isn't available in this browser.", 'err');
+      outputEl.innerHTML =
+        'This demo needs desktop Chrome with Gemini Nano and image input. Work through ' +
+        '<a href="' + SETUP_URL + '">Setup &amp; the availability lifecycle</a>, ' +
+        'or try the <a href="' + LIVE_URL + '">hosted demo</a>.';
+      runBtn.disabled = true;
+    }
+
+    // --- Boot: gate on availability BEFORE anyone can prompt ---
+    (async () => {
+      const availability = await getMultimodalAvailability();
+      if (availability === 'unavailable') {
+        showUnavailable();
+        return;
+      }
+      if (availability === 'available') {
+        setStatus('Ready. Drop an image and ask.', 'ok');
+      } else {
+        // downloadable | downloading — the model pulls down on your first ask.
+        setStatus('Ready — the model downloads on your first question (' + availability + ').', 'warn');
+      }
+      runBtn.disabled = false;
+    })();
+
+    // --- Teardown: free the vision tower and the preview URL ---
+    window.addEventListener('beforeunload', () => {
+      if (sessionPromise) sessionPromise.then((s) => s.destroy()).catch(() => {});
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+    });
+  </script>
+</body>
+</html>
