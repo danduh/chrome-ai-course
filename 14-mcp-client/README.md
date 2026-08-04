@@ -9,8 +9,8 @@ the server. No frameworks, no SDK, no build step — plain browser JavaScript,
 inline in `index.html`.
 
 Lesson: **[An MCP client in the browser](https://danduh.me/courses/chrome-built-in-ai/mcp-client)**
-Hosted demo: **[windowai.danduh.me/mcp-client](https://windowai.danduh.me/mcp-client)**
-(with the [API walkthrough](https://windowai.danduh.me/mcp-client/docs)).
+Hosted demo: **[windowai.danduh.me/mcp-client/mcp-client-demo](https://windowai.danduh.me/mcp-client/mcp-client-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/mcp-client/mcp-client-api-documentation)).
 
 ## What it shows
 

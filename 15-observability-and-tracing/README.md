@@ -6,8 +6,8 @@ step, no dependencies — plain browser JavaScript, inline in `index.html`. Run 
 on-device call and see the single captured span three ways at once.
 
 Lesson: **[Observability & tracing](https://danduh.me/courses/chrome-built-in-ai/observability-and-tracing)**
-Hosted demo: **[windowai.danduh.me/observability](https://windowai.danduh.me/observability)**
-(with the [API walkthrough](https://windowai.danduh.me/observability/docs)).
+Hosted demo: **[windowai.danduh.me/observability/observability-demo](https://windowai.danduh.me/observability/observability-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/observability/observability-api-documentation)).
 
 ## What it shows
 

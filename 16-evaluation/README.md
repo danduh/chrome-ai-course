@@ -6,8 +6,8 @@ build step, no dependencies — plain browser JavaScript, inline in `index.html`
 Pick a golden-set case, run it many times, and read the stability rate.
 
 Lesson: **[Evaluation](https://danduh.me/courses/chrome-built-in-ai/evaluation)**
-Hosted demo: **[windowai.danduh.me/evaluation](https://windowai.danduh.me/evaluation)**
-(with the [API walkthrough](https://windowai.danduh.me/evaluation/docs)).
+Hosted demo: **[windowai.danduh.me/evaluation/evaluation-demo](https://windowai.danduh.me/evaluation/evaluation-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/evaluation/evaluation-api-documentation)).
 
 ## What it shows
 

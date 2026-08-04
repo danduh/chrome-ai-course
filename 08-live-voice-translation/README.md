@@ -5,8 +5,8 @@ each sentence on-device with Chrome's `Translator`. No frameworks, no build step
 no dependencies — plain browser JavaScript, inline in `index.html`.
 
 Lesson: **[Live voice translation](https://danduh.me/courses/chrome-built-in-ai/live-voice-translation)**
-Hosted demo: **[windowai.danduh.me/live-translate](https://windowai.danduh.me/live-translate)**
-(with the [API walkthrough](https://windowai.danduh.me/live-translate/docs)).
+Hosted demo: **[windowai.danduh.me/live-translate/live-translate-demo](https://windowai.danduh.me/live-translate/live-translate-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/live-translate/live-translate-api-documentation)).
 
 ## What it shows
 

@@ -7,8 +7,8 @@ nothing sent over the network. No frameworks, no build step, no dependencies —
 inline in `index.html`.
 
 Lesson: **[Embeddings (SemanticEmbedder)](https://danduh.me/courses/chrome-built-in-ai/embeddings)**
-Hosted demo: **[windowai.danduh.me/embeddings](https://windowai.danduh.me/embeddings)**
-(with the [API walkthrough](https://windowai.danduh.me/embeddings/docs)).
+Hosted demo: **[windowai.danduh.me/embeddings/embeddings-cross-lingual](https://windowai.danduh.me/embeddings/embeddings-cross-lingual)**
+(with the [API walkthrough](https://windowai.danduh.me/embeddings/embeddings-api-documentation)).
 
 > **Early Preview API.** `SemanticEmbedder` is not on stable Chrome. It ships in
 > the Early Preview Program on **Chrome Canary 152+**, behind the

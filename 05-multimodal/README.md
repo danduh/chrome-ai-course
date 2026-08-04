@@ -5,7 +5,7 @@ image, type a question, and the answer streams in underneath — no upload, no
 API key, nothing leaving the machine.
 
 Lesson: **[Multimodal: image input](https://danduh.me/courses/chrome-built-in-ai/multimodal)**
-· Hosted demo: **[windowai.danduh.me/multimodal](https://windowai.danduh.me/multimodal)**
+· Hosted demo: **[windowai.danduh.me/multimodal/multimodal-demo](https://windowai.danduh.me/multimodal/multimodal-demo)**
 
 ## What it shows
 

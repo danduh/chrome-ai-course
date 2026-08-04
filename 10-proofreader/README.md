@@ -7,8 +7,8 @@ renders as an inline diff and a list of suggestions. No frameworks, no build
 step, no dependencies — plain browser JavaScript, inline in `index.html`.
 
 Lesson: **[The Proofreader API](https://danduh.me/courses/chrome-built-in-ai/proofreader)**
-Hosted demo: **[windowai.danduh.me/proofreader](https://windowai.danduh.me/proofreader)**
-(with the [API walkthrough](https://windowai.danduh.me/proofreader/docs)).
+Hosted demo: **[windowai.danduh.me/proofreader/proofreader-demo](https://windowai.danduh.me/proofreader/proofreader-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/proofreader/proofreader-api-documentation)).
 
 ## What it shows
 

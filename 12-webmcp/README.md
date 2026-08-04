@@ -6,8 +6,8 @@ drive that cart by calling them. No frameworks, no build step, no dependencies â
 plain browser JavaScript, inline in `index.html`.
 
 Lesson: **[WebMCP: your page as a tool surface](https://danduh.me/courses/chrome-built-in-ai/webmcp)**
-Hosted demo: **[windowai.danduh.me/webmcp](https://windowai.danduh.me/webmcp)**
-(with the [API walkthrough](https://windowai.danduh.me/webmcp/docs)).
+Hosted demo: **[windowai.danduh.me/webmcp/webmcp-demo](https://windowai.danduh.me/webmcp/webmcp-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/webmcp/webmcp-api-documentation)).
 
 ## What it shows
 

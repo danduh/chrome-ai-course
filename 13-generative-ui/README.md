@@ -8,8 +8,8 @@ sandboxed iframe, and the iframe posts its submitted values back over
 JavaScript, inline in `index.html`.
 
 Lesson: **[Generative UI (MCP Apps)](https://danduh.me/courses/chrome-built-in-ai/generative-ui)**
-Hosted demo: **[windowai.danduh.me/generative-ui](https://windowai.danduh.me/generative-ui)**
-(with the [API walkthrough](https://windowai.danduh.me/generative-ui/docs)).
+Hosted demo: **[windowai.danduh.me/generative-ui/generative-ui-demo](https://windowai.danduh.me/generative-ui/generative-ui-demo)**
+(with the [API walkthrough](https://windowai.danduh.me/generative-ui/generative-ui-api-documentation)).
 
 ## What it shows
 
