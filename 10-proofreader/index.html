@@ -120,12 +120,13 @@
     function errName(e) { return e && e.name ? e.name : 'Error'; }
     function errMessage(e) { return e && e.message ? e.message : String(e); }
 
-    function escapeHtml(s) {
+    function esc(s) {
       return String(s)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function clearOutput() {
@@ -228,7 +229,7 @@
     function renderDiff(input, corrections) {
       const segs = buildSegments(input, corrections);
       diffEl.innerHTML = segs.map((s) => {
-        const t = escapeHtml(s.text);
+        const t = esc(s.text);
         if (s.kind === 'unchanged') return '<span>' + t + '</span>';
         if (s.kind === 'removed') return s.text ? '<del>' + t + '</del>' : '';
         return s.text ? '<ins>' + t + '</ins>' : '';
@@ -242,12 +243,12 @@
         return;
       }
       listEl.innerHTML = corrections.map((c) => {
-        const original = escapeHtml(input.slice(c.startIndex, c.endIndex));
-        const correction = escapeHtml(c.correction);
+        const original = esc(input.slice(c.startIndex, c.endIndex));
+        const correction = esc(c.correction);
         const types = (c.types && c.types.length)
-          ? ' ' + c.types.map((t) => '<code>' + escapeHtml(t) + '</code>').join(' ')
+          ? ' ' + c.types.map((t) => '<code>' + esc(t) + '</code>').join(' ')
           : '';
-        const explanation = c.explanation ? ' — ' + escapeHtml(c.explanation) : '';
+        const explanation = c.explanation ? ' — ' + esc(c.explanation) : '';
         return '<li>changed &ldquo;<del>' + original + '</del>&rdquo; &rarr; ' +
           '&ldquo;<ins>' + correction + '</ins>&rdquo;' + types + explanation + '</li>';
       }).join('');

@@ -36,7 +36,10 @@ interface TranslatorInstance {
 }
 
 interface LanguageModelCreateOptions {
-  outputLanguage?: string;
+  // The Prompt API declares languages via expectedInputs/expectedOutputs — it has
+  // no outputLanguage option (that one is the Summarizer's).
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   monitor?: (m: DownloadMonitor) => void;
 }
 interface LanguageModelSession {
@@ -172,7 +175,8 @@ function monitor(m: DownloadMonitor): void {
 }
 
 // Build one runner. A missing global or an `unavailable` state throws — the
-// caller turns that into ERROR runs, never FAIL. Always outputLanguage:'en'.
+// caller turns that into ERROR runs, never FAIL. Each API declares its own
+// language: Summarizer keeps outputLanguage, the Prompt API uses expectedInputs/Outputs.
 async function makeRunner(c: EvalCase): Promise<Runner> {
   if (c.api === 'summarizer') {
     if (typeof Summarizer === 'undefined') throw named('unavailable');
@@ -193,7 +197,10 @@ async function makeRunner(c: EvalCase): Promise<Runner> {
     return { call: () => t.translate(c.input), destroy: () => t.destroy() };
   }
   if (typeof LanguageModel === 'undefined') throw named('unavailable');
-  const opts: LanguageModelCreateOptions = { outputLanguage: 'en' };
+  const opts: LanguageModelCreateOptions = {
+    expectedInputs: [{ type: 'text', languages: ['en'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }],
+  };
   if ((await LanguageModel.availability(opts)) === 'unavailable') throw named('unavailable');
   const s = await LanguageModel.create({ ...opts, monitor });
   return { call: () => s.prompt(c.input), destroy: () => s.destroy() };
@@ -263,7 +270,7 @@ const badgeClass = (rate: number | null): string =>
 
 // --- Rendering (typed mirror of the inline DOM logic) ---
 const esc = (s: string): string =>
-  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] ?? c));
+  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
 
 function dotSpan(r: RunResult): string {
   const cls = r.status === 'pass' ? 'dot pass' : r.status === 'fail' ? 'dot fail' : 'dot err';
@@ -380,7 +387,14 @@ async function probeSelected(): Promise<void> {
         typeof Translator === 'undefined'
           ? 'missing'
           : await Translator.availability({ sourceLanguage: 'en', targetLanguage: 'es' });
-    else state = typeof LanguageModel === 'undefined' ? 'missing' : await LanguageModel.availability({ outputLanguage: 'en' });
+    else
+      state =
+        typeof LanguageModel === 'undefined'
+          ? 'missing'
+          : await LanguageModel.availability({
+              expectedInputs: [{ type: 'text', languages: ['en'] }],
+              expectedOutputs: [{ type: 'text', languages: ['en'] }],
+            });
   } catch {
     state = 'unavailable';
   }

@@ -2,7 +2,7 @@
 
 The smallest possible Chrome built-in AI demo. It feature-detects the
 `LanguageModel` global, checks `availability()`, and on a click creates a
-session (with `outputLanguage: 'en'` and a download-progress monitor), streams
+session (declaring languages via `expectedInputs`/`expectedOutputs`, plus a download-progress monitor), streams
 the answer to one prompt, then calls `destroy()`.
 
 Prompt: _"In one sentence, explain on-device AI to a web developer."_

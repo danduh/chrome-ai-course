@@ -33,7 +33,6 @@ interface CreateMonitor {
 interface CreateOptions {
   expectedInputs?: Array<{ type: 'text' | 'image'; languages?: string[] }>;
   expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
-  outputLanguage?: string;
   monitor?: (m: CreateMonitor) => void;
 }
 
@@ -97,7 +96,6 @@ function getSession(): Promise<MultimodalSession> {
   sessionPromise = LanguageModel.create({
     expectedInputs: [{ type: 'text', languages: ['en'] }, { type: 'image' }],
     expectedOutputs: [{ type: 'text', languages: ['en'] }],
-    outputLanguage: 'en',
     monitor(m) {
       m.addEventListener('downloadprogress', (e) => {
         const frac = e.loaded != null ? e.loaded : 0;

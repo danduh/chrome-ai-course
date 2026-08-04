@@ -10,7 +10,7 @@ Lesson: **[Multimodal: image input](https://danduh.me/courses/chrome-built-in-ai
 ## What it shows
 
 - Probing multimodal support with `LanguageModel.availability({ expectedInputs: [{ type: 'image' }] })`, wrapped in try/catch (older builds throw on the option).
-- Opting a session into images with `expectedInputs` at `create()` — the option that loads the vision tower — plus a `monitor` for first-run download progress and `outputLanguage: 'en'`.
+- Opting a session into images with `expectedInputs` at `create()` — the option that loads the vision tower — plus a `monitor` for first-run download progress.
 - Getting a `Blob` three ways: a file picker, drag-and-drop, and clipboard paste.
 - Downsampling to a 512px tile with a canvas and `canvas.toBlob` (null-checked).
 - Prompting with role-wrapped content parts — `[{ role: 'user', content: [{ type: 'text', value }, { type: 'image', value: blob }] }]` — and streaming the reply as deltas.

@@ -107,12 +107,13 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message || e.name : String(e);
 }
 
-function escapeHtml(s: unknown): string {
+function esc(s: unknown): string {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function clearOutput(): void {
@@ -240,7 +241,7 @@ function renderDiff(
   const segs = buildSegments(input, corrections);
   diffEl.innerHTML = segs
     .map((s) => {
-      const t = escapeHtml(s.text);
+      const t = esc(s.text);
       if (s.kind === 'unchanged') return '<span>' + t + '</span>';
       if (s.kind === 'removed') return s.text ? '<del>' + t + '</del>' : '';
       return s.text ? '<ins>' + t + '</ins>' : '';
@@ -259,14 +260,14 @@ function renderList(
   }
   listEl.innerHTML = corrections
     .map((c) => {
-      const original = escapeHtml(input.slice(c.startIndex, c.endIndex));
-      const correction = escapeHtml(c.correction);
+      const original = esc(input.slice(c.startIndex, c.endIndex));
+      const correction = esc(c.correction);
       const types =
         c.types && c.types.length
           ? ' ' +
-            c.types.map((t) => '<code>' + escapeHtml(t) + '</code>').join(' ')
+            c.types.map((t) => '<code>' + esc(t) + '</code>').join(' ')
           : '';
-      const explanation = c.explanation ? ' — ' + escapeHtml(c.explanation) : '';
+      const explanation = c.explanation ? ' — ' + esc(c.explanation) : '';
       return (
         '<li>changed &ldquo;<del>' +
         original +

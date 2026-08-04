@@ -104,7 +104,6 @@
       sessionPromise = LanguageModel.create({
         expectedInputs: [{ type: 'text', languages: ['en'] }, { type: 'image' }],
         expectedOutputs: [{ type: 'text', languages: ['en'] }],
-        outputLanguage: 'en',
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
             const frac = e.loaded != null ? e.loaded : 0;

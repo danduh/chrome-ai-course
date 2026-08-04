@@ -24,7 +24,8 @@ interface ToolDefinition {
 }
 
 interface LanguageModelCreateOptions {
-  outputLanguage?: string;
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   initialPrompts?: Array<{ role: Role; content: string }>;
   tools?: ToolDefinition[];
   signal?: AbortSignal;
@@ -189,7 +190,7 @@ function parseJson<T>(text: string): T | null {
   return null;
 }
 
-// --- Session creation: always outputLanguage:'en' + a download monitor. ---
+// --- Session creation: expectedInputs/expectedOutputs declare languages + a download monitor. ---
 async function createSession(
   opts: LanguageModelCreateOptions,
 ): Promise<LanguageModelSession> {
@@ -197,7 +198,8 @@ async function createSession(
   dlEl.value = 0;
   const session = await LanguageModel.create({
     ...opts,
-    outputLanguage: 'en', // always — this is load-bearing
+    expectedInputs:  [{ type: 'text', languages: ['en'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
         dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds

@@ -103,7 +103,9 @@ Standard shipping takes three to five business days.</textarea>
       runBtn.disabled = true;
     }
 
-    function escapeHtml(s) {
+    // Escape every interpolated dynamic value before it lands in innerHTML —
+    // the ranked rows carry the user's own document lines (untrusted text).
+    function esc(s) {
       return s.replace(/[&<>"']/g, (c) => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
       ));
@@ -181,7 +183,7 @@ Standard shipping takes three to five business days.</textarea>
           '<div class="row' + (i === 0 ? ' top' : '') + '">' +
             '<span class="rank">' + (i + 1) + '</span>' +
             '<span class="score">' + row.score.toFixed(3) + '</span>' +
-            '<span class="doc">' + escapeHtml(row.text) + '</span>' +
+            '<span class="doc">' + esc(row.text) + '</span>' +
           '</div>'
         )
         .join('');

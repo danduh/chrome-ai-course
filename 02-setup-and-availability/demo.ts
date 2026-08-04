@@ -22,7 +22,8 @@ interface DownloadMonitor {
 }
 
 interface LanguageModelCreateOptions {
-  outputLanguage?: string;
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   initialPrompts?: Array<{
     role: 'system' | 'user' | 'assistant';
     content: string;
@@ -141,7 +142,10 @@ async function init(): Promise<void> {
 
   let state: Availability;
   try {
-    state = await LanguageModel.availability({ outputLanguage: 'en' });
+    state = await LanguageModel.availability({
+      expectedInputs:  [{ type: 'text', languages: ['en'] }],
+      expectedOutputs: [{ type: 'text', languages: ['en'] }],
+    });
   } catch (e) {
     degrade('<code>availability()</code> threw: ' + errName(e) + '.');
     return;
@@ -178,7 +182,8 @@ async function ensureSession(): Promise<LanguageModelSession> {
   setStatus('Preparing Gemini Nano…', 'warn');
 
   session = await LanguageModel.create({
-    outputLanguage: 'en', // always — this is load-bearing
+    expectedInputs:  [{ type: 'text', languages: ['en'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
         // e.loaded is a 0..1 fraction — there is no e.total in current builds.

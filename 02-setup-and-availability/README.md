@@ -15,7 +15,7 @@ Hosted browser check: **[windowai.danduh.me/status](https://windowai.danduh.me/s
 - A colored status line for each of the four states: `unavailable`, `downloadable`, `downloading`, `available` — with clear guidance for each.
 - The `unavailable` path degrading gracefully with links to the lesson and the live browser check (never a blank page).
 - First-run download progress from a `monitor` (`e.loaded` is a 0..1 fraction, fed straight into `<progress max="1">`).
-- Creating the session with `outputLanguage: 'en'`.
+- Creating the session with `expectedInputs`/`expectedOutputs` declaring its languages.
 - A one-word test `prompt()` once the model is `available`, to prove it answers on-device.
 - `LanguageModel.params()` output when the runtime exposes it (feature-detected first).
 - A "Re-check" button, and `destroy()` on `beforeunload` to free GPU memory.

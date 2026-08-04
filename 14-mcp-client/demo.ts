@@ -19,7 +19,8 @@ interface DownloadMonitor {
 }
 
 interface LanguageModelCreateOptions {
-  outputLanguage?: string;
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   initialPrompts?: Array<{ role: Role; content: string }>;
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
@@ -410,7 +411,7 @@ async function callTool(t: Transport, name: string, args: Record<string, unknown
 }
 
 // =====================================================================
-// Session lifecycle: outputLanguage:'en' + a download monitor. Recreated
+// Session lifecycle: expectedInputs/expectedOutputs + a download monitor. Recreated
 // when the tool set changes (the system prompt embeds the tool list).
 // =====================================================================
 async function getAgentSession(tools: McpToolInfo[]): Promise<LanguageModelSession> {
@@ -421,7 +422,8 @@ async function getAgentSession(tools: McpToolInfo[]): Promise<LanguageModelSessi
   dlEl.hidden = false;
   dlEl.value = 0;
   agentSession = await LanguageModel.create({
-    outputLanguage: 'en',           // load-bearing — omit it and JSON degrades
+    expectedInputs:  [{ type: 'text', languages: ['en'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }],
     initialPrompts: [{ role: 'system', content: buildSystemPrompt(tools) }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {

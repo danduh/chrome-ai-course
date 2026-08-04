@@ -18,7 +18,7 @@ Hosted demo: **[windowai.danduh.me/webmcp/webmcp-demo](https://windowai.danduh.m
 - Wiring an in-page `LanguageModel` agent that actually calls the tools: a session with a system prompt that lists the tools, looping prompt (with `responseConstraint: INTENT_SCHEMA`) → parse → run the tool → feed the result back, logging every call.
 - Coercing a WebMCP `execute` result (`Promise<unknown>`) to the string the agent loop feeds back.
 - Feature-detecting **both** `document.modelContext` and `LanguageModel`, degrading gracefully when either is missing (flag guidance + Setup + hosted-demo links) — the cart stays usable either way.
-- Passing `outputLanguage: 'en'` to `create()`, showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction), and `destroy()` on teardown.
+- Declaring the session languages with `expectedInputs`/`expectedOutputs` on `create()`, showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction), and `destroy()` on teardown.
 
 The in-page agent uses the intent loop (a `responseConstraint` JSON schema plus a
 prompt/parse/run/feed cycle) rather than `LanguageModel.create({ tools })`,

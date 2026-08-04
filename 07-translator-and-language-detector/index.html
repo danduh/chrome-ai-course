@@ -148,6 +148,7 @@
     // Render the ranked detection results. Results arrive sorted by confidence
     // descending and usually end with a trailing 'und' (unknown) entry.
     function renderDetection(results) {
+      const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
       detectOut.innerHTML = results
         .slice(0, 4)
         .map((r, i) => {
@@ -156,7 +157,7 @@
             ? 'und (unknown)'
             : langName(r.detectedLanguage) + ' (' + r.detectedLanguage + ')';
           const cls = i === 0 ? 'rowline top' : 'rowline';
-          return '<div class="' + cls + '"><span>' + label + '</span><span>' + pct + '</span></div>';
+          return '<div class="' + cls + '"><span>' + esc(label) + '</span><span>' + pct + '</span></div>';
         })
         .join('');
     }

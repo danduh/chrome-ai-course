@@ -25,7 +25,10 @@ interface SummarizerInstance {
 }
 
 interface LanguageModelCreateOptions {
-  outputLanguage?: string;
+  // The Prompt API declares languages via expectedInputs/expectedOutputs — it has
+  // no outputLanguage option (that one is the Summarizer's).
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   monitor?: (m: DownloadMonitor) => void;
 }
 interface LanguageModelSession {
@@ -263,10 +266,7 @@ addSink((span) => {
   logEl.textContent = consoleLine(span) + '\n' + logEl.textContent;
 });
 
-interface AvailabilityFactory {
-  availability(options?: { outputLanguage?: string }): Promise<Availability>;
-}
-function apiGlobal(api: DemoApi): AvailabilityFactory | undefined {
+function apiGlobal(api: DemoApi): typeof Summarizer | typeof LanguageModel | undefined {
   if (api === 'summarizer') return typeof Summarizer !== 'undefined' ? Summarizer : undefined;
   return typeof LanguageModel !== 'undefined' ? LanguageModel : undefined;
 }
@@ -307,7 +307,15 @@ async function checkAvailability(): Promise<void> {
   }
   let status: Availability;
   try {
-    status = await Global.availability({ outputLanguage: 'en' });
+    // Summarizer declares language with outputLanguage; the Prompt API with
+    // expectedInputs/expectedOutputs. Same availability() gate, two option shapes.
+    status =
+      api === 'summarizer'
+        ? await Summarizer.availability({ outputLanguage: 'en' })
+        : await LanguageModel.availability({
+            expectedInputs: [{ type: 'text', languages: ['en'] }],
+            expectedOutputs: [{ type: 'text', languages: ['en'] }],
+          });
   } catch (e) {
     degrade('<code>availability()</code> threw: ' + (e instanceof Error ? e.message : String(e)) + '.');
     return;
@@ -366,8 +374,15 @@ async function run(): Promise<void> {
       session = s;
       stream = traceStream('summarizer', 'summarize', s, () => s.summarizeStreaming(text));
     } else {
-      seenAvailability = await LanguageModel.availability({ outputLanguage: 'en' });
-      const s = await LanguageModel.create({ outputLanguage: 'en', monitor });
+      seenAvailability = await LanguageModel.availability({
+        expectedInputs: [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+      });
+      const s = await LanguageModel.create({
+        expectedInputs: [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        monitor,
+      });
       session = s;
       stream = traceStream('prompt', 'prompt', s, () => s.promptStreaming(text));
     }

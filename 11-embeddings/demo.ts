@@ -85,7 +85,9 @@ function degrade(reason: string): void {
   runBtn.disabled = true;
 }
 
-function escapeHtml(s: string): string {
+// Escape every interpolated dynamic value before it lands in innerHTML —
+// the ranked rows carry the user's own document lines (untrusted text).
+function esc(s: string): string {
   const map: Record<string, string> = {
     '&': '&amp;',
     '<': '&lt;',
@@ -178,7 +180,7 @@ function render(ranked: Ranked[]): void {
         row.score.toFixed(3) +
         '</span>' +
         '<span class="doc">' +
-        escapeHtml(row.text) +
+        esc(row.text) +
         '</span>' +
         '</div>',
     )

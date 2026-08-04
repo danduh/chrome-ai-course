@@ -262,7 +262,14 @@
       }
       let status;
       try {
-        status = await Global.availability({ outputLanguage: 'en' });
+        // Summarizer declares language with outputLanguage; the Prompt API with
+        // expectedInputs/expectedOutputs. Same availability() gate, two option shapes.
+        status = api === 'summarizer'
+          ? await Summarizer.availability({ outputLanguage: 'en' })
+          : await LanguageModel.availability({
+              expectedInputs: [{ type: 'text', languages: ['en'] }],
+              expectedOutputs: [{ type: 'text', languages: ['en'] }],
+            });
       } catch (e) {
         degrade('<code>availability()</code> threw: ' + (e && e.message ? e.message : e) + '.');
         return;
@@ -314,8 +321,15 @@
           });
           stream = traceStream('summarizer', 'summarize', session, () => session.summarizeStreaming(text));
         } else {
-          seenAvailability = await LanguageModel.availability({ outputLanguage: 'en' });
-          session = await LanguageModel.create({ outputLanguage: 'en', monitor });
+          seenAvailability = await LanguageModel.availability({
+            expectedInputs: [{ type: 'text', languages: ['en'] }],
+            expectedOutputs: [{ type: 'text', languages: ['en'] }],
+          });
+          session = await LanguageModel.create({
+            expectedInputs: [{ type: 'text', languages: ['en'] }],
+            expectedOutputs: [{ type: 'text', languages: ['en'] }],
+            monitor,
+          });
           stream = traceStream('prompt', 'prompt', session, () => session.promptStreaming(text));
         }
         dlEl.hidden = true;

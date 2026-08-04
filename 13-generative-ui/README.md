@@ -29,7 +29,7 @@ Hosted demo: **[windowai.danduh.me/generative-ui/generative-ui-demo](https://win
   `ui/submit` message; the host validates `event.source === uiFrame.contentWindow`
   before trusting it (sandboxed `srcdoc` frames report `event.origin === "null"`,
   so an origin string check is useless).
-- Passing `outputLanguage: 'en'` to every `create()`, and `destroy()` on `beforeunload`.
+- Declaring the session languages with `expectedInputs`/`expectedOutputs` on every `create()`, and `destroy()` on `beforeunload`.
 - Graceful degradation when the API is missing or `unavailable` — the **canned
   example** button renders the same tool output and runs the full iframe +
   postMessage round-trip with no model at all.

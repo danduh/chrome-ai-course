@@ -12,7 +12,7 @@ Hosted demo: **[windowai.danduh.me/chat/chat-demo](https://windowai.danduh.me/ch
 
 - Feature-detecting `LanguageModel` and gating on `availability()` before `create()`.
 - Showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction).
-- Creating a session with `initialPrompts` (a `system` message at index 0) and `outputLanguage: 'en'`.
+- Creating a session with `initialPrompts` (a `system` message at index 0), declaring languages with `expectedInputs`/`expectedOutputs`.
 - Seeding the `temperature` and `topK` inputs from `LanguageModel.params()` when the runtime exposes it.
 - Streaming the reply with `promptStreaming()` and appending the deltas (`text += chunk`).
 - A live `contextUsage` / `contextWindow` token readout after each turn.

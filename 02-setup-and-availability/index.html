@@ -56,7 +56,7 @@
   <script>
     // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
     // Pattern: feature-detect -> availability() -> create() (monitor +
-    //          outputLanguage:'en') -> prompt() -> destroy().
+    //          expectedInputs/expectedOutputs) -> prompt() -> destroy().
     const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
     const LIVE_URL = 'https://windowai.danduh.me/status';
 
@@ -126,7 +126,10 @@
       let state;
       try {
         // "unavailable" | "downloadable" | "downloading" | "available"
-        state = await LanguageModel.availability({ outputLanguage: 'en' });
+        state = await LanguageModel.availability({
+          expectedInputs:  [{ type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        });
       } catch (e) {
         degrade('<code>availability()</code> threw: ' + errName(e) + '.');
         return;
@@ -165,7 +168,8 @@
       setStatus('Preparing Gemini Nano…', 'warn');
 
       session = await LanguageModel.create({
-        outputLanguage: 'en', // always — this is load-bearing
+        expectedInputs:  [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
             // e.loaded is a 0..1 fraction — there is no e.total in current builds.

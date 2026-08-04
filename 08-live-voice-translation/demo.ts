@@ -195,10 +195,6 @@ function populateSelect(sel: HTMLSelectElement, langs: Lang[], def: string): voi
     .join('');
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 function errName(e: unknown): string {
   if (e instanceof DOMException || e instanceof Error) return e.name;
   return 'Error';
@@ -221,26 +217,42 @@ function targetLang(): string {
   return targetLangEl.value;
 }
 
+// Speech-to-text transcripts and on-device translations are untrusted text —
+// build each line with textContent so nothing reaches an innerHTML sink.
+function lineEl(text: string, interim = false): HTMLDivElement {
+  const div = document.createElement('div');
+  div.className = interim ? 'line interim' : 'line';
+  div.textContent = text;
+  return div;
+}
+
+function placeholderEl(text: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = 'placeholder';
+  span.textContent = text;
+  return span;
+}
+
 function renderTranscript(): void {
-  const lines = finals.map((s) => '<div class="line">' + escapeHtml(s) + '</div>');
-  if (interimText) {
-    lines.push('<div class="line interim">' + escapeHtml(interimText) + '</div>');
+  transcriptEl.replaceChildren();
+  if (!finals.length && !interimText) {
+    transcriptEl.append(placeholderEl('Your words appear here as you speak.'));
+    return;
   }
-  transcriptEl.innerHTML = lines.length
-    ? lines.join('')
-    : '<span class="placeholder">Your words appear here as you speak.</span>';
+  for (const s of finals) transcriptEl.append(lineEl(s));
+  if (interimText) transcriptEl.append(lineEl(interimText, true));
 }
 
 function renderTranslation(): void {
-  const lines = translations.map(
-    (s) => '<div class="line">' + escapeHtml(s) + '</div>',
-  );
-  if (interimTranslation) {
-    lines.push('<div class="line interim">' + escapeHtml(interimTranslation) + '</div>');
+  translationEl.replaceChildren();
+  if (!translations.length && !interimTranslation) {
+    translationEl.append(
+      placeholderEl('Translations appear here, one per finalized sentence.'),
+    );
+    return;
   }
-  translationEl.innerHTML = lines.length
-    ? lines.join('')
-    : '<span class="placeholder">Translations appear here, one per finalized sentence.</span>';
+  for (const s of translations) translationEl.append(lineEl(s));
+  if (interimTranslation) translationEl.append(lineEl(interimTranslation, true));
 }
 
 // Probe the pair, then create (and cache) a translator for it. A different pair

@@ -3,7 +3,7 @@
 //
 // This mirrors the inline JS in index.html, with types added. It is NOT loaded
 // by the page. It shows the shape every built-in AI API shares:
-//   availability() -> create() (monitor + outputLanguage:'en') -> use -> destroy()
+//   availability() -> create() (monitor + expectedInputs/expectedOutputs) -> use -> destroy()
 
 // --- Minimal ambient shape of the raw Chrome built-in AI globals used here ---
 // Chrome exposes these on `self`/`window`; there is no official .d.ts yet.
@@ -23,8 +23,9 @@ interface CreateMonitor {
 }
 
 interface LanguageModelCreateOptions {
-  /** Always pass 'en' on current Chrome — it's load-bearing for output quality. */
-  outputLanguage?: string;
+  /** Declare the languages this session will use, on the way in and out. */
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   monitor?: (m: CreateMonitor) => void;
   signal?: AbortSignal;
 }
@@ -68,9 +69,10 @@ async function hello(): Promise<void> {
   }
 
   try {
-    // 3) create() — always outputLanguage:'en'; monitor the first-run download.
+    // 3) create() — declare languages via expectedInputs/expectedOutputs; monitor the first-run download.
     session = await LanguageModel.create({
-      outputLanguage: 'en',
+      expectedInputs:  [{ type: 'text', languages: ['en'] }],
+      expectedOutputs: [{ type: 'text', languages: ['en'] }],
       monitor(m) {
         m.addEventListener('downloadprogress', (e) => {
           const pct = Math.round(e.loaded * 100); // e.loaded is 0..1

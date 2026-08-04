@@ -418,7 +418,7 @@
     }
 
     // =====================================================================
-    // Session lifecycle: outputLanguage:'en' + a download monitor. Recreated
+    // Session lifecycle: expectedInputs/expectedOutputs + a download monitor. Recreated
     // when the tool set changes (the system prompt embeds the tool list).
     // =====================================================================
     async function getAgentSession(tools) {
@@ -429,7 +429,8 @@
       dlEl.hidden = false;
       dlEl.value = 0;
       agentSession = await LanguageModel.create({
-        outputLanguage: 'en',            // load-bearing — omit it and JSON degrades
+        expectedInputs:  [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
         initialPrompts: [{ role: 'system', content: buildSystemPrompt(tools) }],
         monitor: function (m) {
           m.addEventListener('downloadprogress', function (e) {

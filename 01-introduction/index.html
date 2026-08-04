@@ -46,7 +46,7 @@
 
   <script>
     // Plain browser JS. No frameworks. Uses the raw `LanguageModel` global.
-    // Pattern: availability() -> create() (with monitor + outputLanguage:'en')
+    // Pattern: availability() -> create() (with monitor + expectedInputs/expectedOutputs)
     //          -> promptStreaming() -> destroy().
     const statusEl = document.getElementById('status');
     const outputEl = document.getElementById('output');
@@ -110,10 +110,11 @@
       setStatus('Creating a session…', 'warn');
 
       try {
-        // 3) create() — always pass outputLanguage:'en'. Wire a monitor so the
-        //    first-run download shows progress instead of a frozen button.
+        // 3) create() — declare languages via expectedInputs/expectedOutputs. Wire a
+        //    monitor so the first-run download shows progress instead of a frozen button.
         session = await LanguageModel.create({
-          outputLanguage: 'en',
+          expectedInputs:  [{ type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }],
           monitor(m) {
             m.addEventListener('downloadprogress', (e) => {
               // e.loaded is a 0..1 fraction — there is no e.total in current builds.

@@ -164,7 +164,7 @@
     let activeRunner = null;
 
     const esc = (s) =>
-      String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const currentCase = () => EVAL_CASES.find((c) => c.id === selectedId) || EVAL_CASES[0];
 
     function setStatus(html, kind) {
@@ -192,12 +192,17 @@
     function globalName(api) {
       return api === 'summarizer' ? 'Summarizer' : api === 'translator' ? 'Translator' : 'LanguageModel';
     }
-    // Options used both to probe availability() and to create() — always outputLanguage:'en'.
+    // Options used both to probe availability() and to create(). Each API declares
+    // its own language: Summarizer keeps outputLanguage, the Prompt API uses
+    // expectedInputs/expectedOutputs.
     function optsFor(c) {
       if (c.api === 'summarizer')
         return { type: c.summaryType || 'tl;dr', format: 'plain-text', outputLanguage: 'en' };
       if (c.api === 'translator') return { sourceLanguage: 'en', targetLanguage: 'es' };
-      return { outputLanguage: 'en' };
+      return {
+        expectedInputs: [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+      };
     }
     function named(name) {
       const e = new Error(name);

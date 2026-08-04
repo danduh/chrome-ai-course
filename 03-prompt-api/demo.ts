@@ -22,7 +22,8 @@ interface DownloadMonitor {
 }
 
 interface LanguageModelCreateOptions {
-  outputLanguage?: string;
+  expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   temperature?: number;
   topK?: number;
   initialPrompts?: Array<{
@@ -166,7 +167,8 @@ async function ensureSession(): Promise<LanguageModelSession> {
   setStatus('Preparing the model…', 'warn');
 
   session = await LanguageModel.create({
-    outputLanguage: 'en', // always — this is load-bearing
+    expectedInputs:  [{ type: 'text', languages: ['en'] }],
+    expectedOutputs: [{ type: 'text', languages: ['en'] }],
     temperature: Number.isFinite(temperature) ? temperature : undefined,
     topK: Number.isFinite(topK) ? topK : undefined,
     initialPrompts: [{ role: 'system', content: systemText }],

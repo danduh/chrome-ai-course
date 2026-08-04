@@ -163,6 +163,7 @@ function errMessage(e: unknown): string {
 // Render the ranked detection results. Results arrive sorted by confidence
 // descending and usually end with a trailing 'und' (unknown) entry.
 function renderDetection(results: LanguageDetectionResult[]): void {
+  const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
   detectOut.innerHTML = results
     .slice(0, 4)
     .map((r, i) => {
@@ -173,7 +174,7 @@ function renderDetection(results: LanguageDetectionResult[]): void {
           : langName(r.detectedLanguage) + ' (' + r.detectedLanguage + ')';
       const cls = i === 0 ? 'rowline top' : 'rowline';
       return (
-        '<div class="' + cls + '"><span>' + label + '</span><span>' + pct + '</span></div>'
+        '<div class="' + cls + '"><span>' + esc(label) + '</span><span>' + pct + '</span></div>'
       );
     })
     .join('');

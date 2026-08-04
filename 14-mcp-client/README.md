@@ -32,7 +32,7 @@ Hosted demo: **[windowai.danduh.me/mcp-client/mcp-client-demo](https://windowai.
   capped at 8 turns.
 - Feature-detecting `LanguageModel` and gating on `availability()` before
   `create()`, showing first-run download progress with a `monitor` (`e.loaded` is
-  a 0..1 fraction), passing `outputLanguage: 'en'`, and `destroy()` on teardown.
+  a 0..1 fraction), declaring the session languages with `expectedInputs`/`expectedOutputs`, and `destroy()` on teardown.
 - Graceful degradation: connecting and browsing tools works without Gemini Nano;
   only the agent step needs the Prompt API, so it's gated on its own.
 

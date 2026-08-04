@@ -197,12 +197,13 @@
       return null;
     }
 
-    // --- Session creation: always outputLanguage:'en' + a download monitor. -
+    // --- Session creation: expectedInputs/expectedOutputs declare languages + a download monitor. -
     async function createSession(opts) {
       dlEl.hidden = false;
       dlEl.value = 0;
       const session = await LanguageModel.create(Object.assign({}, opts, {
-        outputLanguage: 'en', // always — this is load-bearing
+        expectedInputs:  [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
             dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
