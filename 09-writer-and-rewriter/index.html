@@ -39,11 +39,11 @@
     <code>Rewriter</code> (Gemini Nano), running on-device. Lesson:
     <a href="https://danduh.me/courses/chrome-built-in-ai/writer-and-rewriter">Writer &amp; Rewriter</a>.</p>
 
-  <div class="note">Heads up: these two APIs are still behind Chrome flags and are
+  <div class="note">Heads up: these two APIs are still behind a Chrome flag and are
     off by default, so on most machines they report <code>unavailable</code>. Enable
-    <code>#writer-api-for-gemini-nano</code> and <code>#rewriter-api-for-gemini-nano</code>
-    in <code>chrome://flags</code>, then restart Chrome. If they're off, each panel
-    below tells you which flag to flip.</div>
+    the one shared flag <code>#writer-api-for-gemini-nano</code> in
+    <code>chrome://flags</code> (it covers both — there is no separate Rewriter
+    flag), then restart Chrome. If it's off, each panel below tells you so.</div>
 
   <!-- ---------- Writer ---------- -->
   <section>
@@ -75,8 +75,8 @@
       <div class="col">
         <label for="w-length">length</label>
         <select id="w-length">
-          <option value="short">short</option>
-          <option value="medium" selected>medium</option>
+          <option value="short" selected>short</option>
+          <option value="medium">medium</option>
           <option value="long">long</option>
         </select>
       </div>
@@ -85,6 +85,11 @@
     <div class="field">
       <label for="w-shared">sharedContext (optional) — the frame every draft is written in</label>
       <input type="text" id="w-shared" placeholder="e.g. Developer changelog. Terse, second person, no marketing adjectives." />
+    </div>
+
+    <div class="field">
+      <label for="w-context">context (optional) — a per-call steer for this one write</label>
+      <input type="text" id="w-context" placeholder="e.g. Keep every flag name and version number exact." />
     </div>
 
     <div class="actions">
@@ -171,6 +176,7 @@
       const formatEl = document.getElementById(cfg.ids.format);
       const lengthEl = document.getElementById(cfg.ids.length);
       const extraEl = document.getElementById(cfg.ids.extra);
+      const contextEl = cfg.ids.context ? document.getElementById(cfg.ids.context) : null;
       const runBtn = document.getElementById(cfg.ids.run);
       const outputEl = document.getElementById(cfg.ids.output);
 
@@ -241,7 +247,7 @@
           ...buildCreateOptions(),
           monitor(m) {
             m.addEventListener('downloadprogress', (e) => {
-              dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+              dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
               setStatus(statusEl, 'Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
             });
           },
@@ -251,10 +257,11 @@
         return created;
       }
 
-      // Writer streams from the brief; Rewriter streams the transform, with a per-call context.
+      // Both stream with an optional per-call context: Writer from the brief, Rewriter the transform.
       function startStream(text) {
         if (cfg.kind === 'writer') {
-          return instance.writeStreaming(text);
+          const context = contextEl ? contextEl.value.trim() : '';
+          return instance.writeStreaming(text, context ? { context } : undefined);
         }
         const context = extraEl.value.trim();
         return instance.rewriteStreaming(text, context ? { context } : undefined);
@@ -290,8 +297,8 @@
               'into sections and run them one at a time.';
           } else if (name === 'NotSupportedError') {
             outputEl.textContent =
-              'That tone/format/length combo is not supported here (NotSupportedError). Try another.';
-          } else if (name === 'InvalidStateError') {
+              'This configuration can\'t run here (NotSupportedError) — usually an unsupported language. Try another.';
+          } else if (name === 'AbortError') {
             outputEl.textContent = 'That instance was destroyed. Run again to recreate it.';
             instance = null;
           } else {
@@ -319,13 +326,13 @@
       apiName: 'Writer',
       flag: '#writer-api-for-gemini-nano',
       ids: { status: 'w-status', dl: 'w-dl', source: 'w-source', tone: 'w-tone',
-        format: 'w-format', length: 'w-length', extra: 'w-shared', run: 'w-run', output: 'w-output' },
+        format: 'w-format', length: 'w-length', extra: 'w-shared', context: 'w-context', run: 'w-run', output: 'w-output' },
     });
 
     const rewriterTool = setupTool({
       kind: 'rewriter',
       apiName: 'Rewriter',
-      flag: '#rewriter-api-for-gemini-nano',
+      flag: '#writer-api-for-gemini-nano',
       ids: { status: 'r-status', dl: 'r-dl', source: 'r-source', tone: 'r-tone',
         format: 'r-format', length: 'r-length', extra: 'r-context', run: 'r-run', output: 'r-output' },
     });

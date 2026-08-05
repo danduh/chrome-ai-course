@@ -15,19 +15,10 @@ interface DownloadMonitor {
   ): void;
 }
 
-// A native tool definition. `execute` MUST resolve to a string.
-interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: object; // JSON Schema
-  execute: (args: any) => Promise<string>;
-}
-
 interface LanguageModelCreateOptions {
   expectedInputs?: Array<{ type: 'text' | 'image' | 'audio'; languages?: string[] }>;
   expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
   initialPrompts?: Array<{ role: Role; content: string }>;
-  tools?: ToolDefinition[];
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
@@ -202,7 +193,7 @@ async function createSession(
     expectedOutputs: [{ type: 'text', languages: ['en'] }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // e.loaded is a 0..1 fraction; e.total is always 1
         setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
       });
     },

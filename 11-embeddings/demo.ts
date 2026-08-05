@@ -6,10 +6,11 @@
 // does not ship it yet — so the minimal ambient surface below keeps this file
 // self-contained.
 
-// --- Minimal ambient surface for Chrome's Semantic Embedder API (Chrome 152 Canary, EPP flag) ---
+// --- Minimal ambient surface for Chrome's Semantic Embedder API (Chrome Canary, #semantic-embedder-api) ---
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
 
-// taskType is an option on embed(), NOT on create(). create() takes no arguments.
+// taskType is an option on embed(), NOT on create(). It is strictly an optional
+// hint the browser can ignore if its model doesn't support it.
 type TaskType =
   | 'semantic-similarity'
   | 'retrieval-query'
@@ -20,6 +21,37 @@ type TaskType =
 interface EmbedOptions {
   taskType?: TaskType;
   signal?: AbortSignal;
+}
+
+// create() accepts { signal, monitor }. The monitor's downloadprogress event
+// carries e.loaded (0..1); e.total is always 1.
+interface DownloadProgressEvent extends Event {
+  readonly loaded: number;
+  readonly total: number;
+}
+
+interface CreateMonitorEventMap {
+  downloadprogress: DownloadProgressEvent;
+}
+
+interface CreateMonitor extends EventTarget {
+  addEventListener<K extends keyof CreateMonitorEventMap>(
+    type: K,
+    listener: (this: CreateMonitor, ev: CreateMonitorEventMap[K]) => void,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+}
+
+type CreateMonitorCallback = (monitor: CreateMonitor) => void;
+
+interface CreateOptions {
+  signal?: AbortSignal;
+  monitor?: CreateMonitorCallback;
 }
 
 // Each embedding is { values: Float32Array }; batch results are positional.
@@ -38,7 +70,7 @@ interface SemanticEmbedderInstance {
 
 interface SemanticEmbedderConstructor {
   availability(): Promise<Availability>;
-  create(): Promise<SemanticEmbedderInstance>; // NO arguments
+  create(options?: CreateOptions): Promise<SemanticEmbedderInstance>;
 }
 
 declare const SemanticEmbedder: SemanticEmbedderConstructor;
@@ -55,6 +87,7 @@ const statusEl = document.getElementById('status') as HTMLDivElement;
 const prepEl = document.getElementById('prep') as HTMLProgressElement;
 const docsEl = document.getElementById('docs') as HTMLTextAreaElement;
 const queryEl = document.getElementById('query') as HTMLInputElement;
+const indexBtn = document.getElementById('index') as HTMLButtonElement;
 const runBtn = document.getElementById('run') as HTMLButtonElement;
 const outputEl = document.getElementById('output') as HTMLDivElement;
 
@@ -63,7 +96,15 @@ interface Ranked {
   score: number;
 }
 
+interface DocVector {
+  text: string;
+  values: Float32Array;
+}
+
+// One embedder, reused across searches. docVectors caches the indexed corpus so a
+// search only has to embed the query — never re-embed every document.
 let embedder: SemanticEmbedderInstance | null = null;
+let docVectors: DocVector[] | null = null;
 let busy = false;
 
 function setStatus(html: string, kind?: 'ok' | 'warn' | 'err'): void {
@@ -71,17 +112,25 @@ function setStatus(html: string, kind?: 'ok' | 'warn' | 'err'): void {
   statusEl.innerHTML = html;
 }
 
+function setBusy(on: boolean): void {
+  busy = on;
+  indexBtn.disabled = on;
+  // Search stays disabled until there's an index to search.
+  runBtn.disabled = on || !docVectors;
+}
+
 function degrade(reason: string): void {
   setStatus(
     reason +
-      ' This is an Early Preview API — enable <code>#semantic-embedder-api</code> in ' +
-      'Chrome 152+ Canary. Work through <a href="' +
+      ' This is an experimental API (Intent to Prototype) — enable ' +
+      '<code>#semantic-embedder-api</code> in Chrome Canary. Work through <a href="' +
       SETUP_URL +
       '">Setup &amp; availability</a>, or try the <a href="' +
       LIVE_DEMO_URL +
       '">hosted demo</a>.',
     'err',
   );
+  indexBtn.disabled = true;
   runBtn.disabled = true;
 }
 
@@ -113,25 +162,42 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-// No downloadprogress event exists for SemanticEmbedder yet, and create() throws if
-// the model isn't ready — so poll availability() until 'available', then create().
-async function waitUntilAvailable(): Promise<void> {
-  const timeoutMs = 5 * 60 * 1000;
-  const start = Date.now();
-  let state: Availability = await SemanticEmbedder.availability();
-  while (state !== 'available') {
-    if (state === 'unavailable') {
-      throw new Error('SemanticEmbedder is not available on this device.');
-    }
-    if (Date.now() - start > timeoutMs) {
-      throw new Error('The embedding model is still preparing — try again shortly.');
-    }
-    prepEl.hidden = false; // indeterminate bar (no percentage available)
-    setStatus('Preparing the on-device model (first-run download can take a minute)…', 'warn');
-    await new Promise((r) => setTimeout(r, 1500));
-    state = await SemanticEmbedder.availability();
-  }
+// One embedder for the whole page. create() accepts { signal, monitor }; the monitor's
+// downloadprogress event carries e.loaded (0..1). Starting the DOWNLOAD needs a user
+// gesture, so this only ever runs from a button click.
+async function ensureEmbedder(): Promise<SemanticEmbedderInstance> {
+  if (embedder) return embedder;
+  embedder = await SemanticEmbedder.create({
+    monitor(m) {
+      m.addEventListener('downloadprogress', (e) => {
+        prepEl.hidden = false;
+        prepEl.value = e.loaded; // 0..1; e.total is always 1
+        setStatus('Downloading the on-device model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+      });
+    },
+  });
   prepEl.hidden = true;
+  return embedder;
+}
+
+function readDocs(): string[] {
+  return docsEl.value
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
+function handleError(e: unknown): void {
+  const name = errName(e);
+  if (name === 'QuotaExceededError') {
+    outputEl.textContent =
+      'An input was too long for the model (QuotaExceededError). Shorten the longest line and retry.';
+  } else if (name === 'NotSupportedError') {
+    outputEl.textContent = 'That input or option is not supported in this build (NotSupportedError).';
+  } else {
+    outputEl.textContent = 'Error: ' + errMessage(e);
+  }
+  setStatus('Error: ' + name + '.', 'err');
 }
 
 // Feature-detect + availability() gate before anything else.
@@ -155,11 +221,11 @@ async function init(): Promise<void> {
   }
 
   if (status === 'available') {
-    setStatus('Model ready. Edit the documents or query and hit Embed &amp; search.', 'ok');
+    setStatus('Model ready. Index the documents, then search.', 'ok');
   } else {
-    setStatus('Model needs a one-time download (~200 MB). It starts on your first search.', 'warn');
+    setStatus('Model needs a one-time download. It starts, with a progress bar, when you index.', 'warn');
   }
-  runBtn.disabled = false;
+  indexBtn.disabled = false; // search unlocks after the first index
 }
 
 function render(ranked: Ranked[]): void {
@@ -187,73 +253,65 @@ function render(ranked: Ranked[]): void {
     .join('');
 }
 
-async function run(): Promise<void> {
-  const documents = docsEl.value
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  const query = queryEl.value.trim();
+// INDEX STEP — embed the corpus once (retrieval-document) and cache the vectors.
+async function indexDocuments(): Promise<void> {
   if (busy) return;
+  const documents = readDocs();
   if (documents.length === 0) {
     setStatus('Add at least one document line.', 'warn');
     return;
   }
+
+  setBusy(true);
+  outputEl.textContent = '';
+  try {
+    await ensureEmbedder(); // create() (with monitor) — first click starts the download
+    setStatus('Embedding ' + documents.length + ' documents (retrieval-document)…', 'warn');
+    // Batch the corpus; results are positional, so embeddings[i] matches documents[i].
+    const res = await embedder!.embed(documents, { taskType: DOC_TASK });
+    docVectors = documents.map((text, i) => ({ text, values: res.embeddings[i].values }));
+    setStatus('Indexed ' + documents.length + ' documents. Type a query and search.', 'ok');
+  } catch (e) {
+    docVectors = null;
+    handleError(e);
+  } finally {
+    prepEl.hidden = true;
+    setBusy(false);
+  }
+}
+
+// SEARCH STEP — embed ONLY the query (retrieval-query), reuse the cached corpus + session.
+async function search(): Promise<void> {
+  if (busy) return;
+  if (!docVectors) {
+    setStatus('Index the documents first.', 'warn');
+    return;
+  }
+  const query = queryEl.value.trim();
   if (!query) {
     setStatus('Type a query to rank against.', 'warn');
     return;
   }
 
-  busy = true;
-  runBtn.disabled = true;
+  setBusy(true);
   outputEl.textContent = '';
-
   try {
-    // Poll until the model is ready, THEN create() (no arguments) — see waitUntilAvailable.
-    await waitUntilAvailable();
-    // One embedder for the whole run; destroyed in finally.
-    embedder = await SemanticEmbedder.create();
+    await ensureEmbedder(); // same session — no re-create, no re-embedding the corpus
+    setStatus('Embedding the query (retrieval-query)…', 'warn');
+    const res = await embedder!.embed(query, { taskType: QUERY_TASK });
+    const queryVec = res.embeddings[0].values;
 
-    setStatus('Embedding ' + documents.length + ' documents and the query…', 'warn');
-
-    // Batch the corpus (retrieval-document); results are positional.
-    const docRes = await embedder.embed(documents, { taskType: DOC_TASK });
-    // The user's query (retrieval-query) — the asymmetric pair beats matching sides.
-    const queryRes = await embedder.embed(query, { taskType: QUERY_TASK });
-    const queryVec = queryRes.embeddings[0].values;
-
-    const ranked: Ranked[] = documents
-      .map((text, i) => ({
-        text,
-        score: cosineSimilarity(queryVec, docRes.embeddings[i].values),
-      }))
+    const ranked: Ranked[] = docVectors
+      .map((d) => ({ text: d.text, score: cosineSimilarity(queryVec, d.values) }))
       .sort((a, b) => b.score - a.score);
 
     render(ranked);
-    setStatus(
-      'Ranked ' + documents.length + ' documents by cosine similarity. Edit and run again.',
-      'ok',
-    );
+    setStatus('Ranked ' + docVectors.length + ' documents by cosine similarity.', 'ok');
   } catch (e) {
-    const name = errName(e);
-    if (name === 'QuotaExceededError') {
-      outputEl.textContent =
-        'An input is over the model quota (QuotaExceededError). Shorten the longest line and retry.';
-    } else if (name === 'NotSupportedError') {
-      outputEl.textContent = 'That input or option is not supported in this build (NotSupportedError).';
-    } else {
-      outputEl.textContent = 'Error: ' + errMessage(e);
-    }
-    setStatus('Error: ' + name + '.', 'err');
+    handleError(e);
   } finally {
-    // Free the model even if embed() threw. create() per run keeps the lifecycle obvious;
-    // in production you can hold ONE embedder and reuse it across searches instead.
-    if (embedder) {
-      embedder.destroy();
-      embedder = null;
-    }
     prepEl.hidden = true;
-    busy = false;
-    runBtn.disabled = false;
+    setBusy(false);
   }
 }
 
@@ -265,7 +323,16 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message || e.name : String(e);
 }
 
-runBtn.addEventListener('click', () => void run());
+indexBtn.addEventListener('click', () => void indexDocuments());
+runBtn.addEventListener('click', () => void search());
+
+// Editing the corpus invalidates the cached index — re-index before searching again.
+docsEl.addEventListener('input', () => {
+  if (!docVectors) return;
+  docVectors = null;
+  runBtn.disabled = true;
+  setStatus('Documents changed — re-index before searching.', 'warn');
+});
 
 // Free the model on teardown so a closed tab doesn't strand a session.
 window.addEventListener('beforeunload', () => {

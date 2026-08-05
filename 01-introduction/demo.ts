@@ -11,8 +11,10 @@
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
 
 interface DownloadProgressEvent extends Event {
-  /** 0..1 fraction. There is no `total` in current builds — multiply by 100. */
+  /** 0..1 fraction of the download; multiply by 100 for a percentage. */
   readonly loaded: number;
+  /** Always 1 — present so `loaded / total` also works. */
+  readonly total: number;
 }
 
 interface CreateMonitor {
@@ -89,7 +91,7 @@ async function hello(): Promise<void> {
     }
     console.log(reply);
   } finally {
-    // 5) Free the GPU memory.
+    // 5) Free the model's memory sooner than the garbage collector would.
     session?.destroy();
     session = null;
   }

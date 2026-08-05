@@ -172,7 +172,7 @@
         expectedOutputs: [{ type: 'text', languages: ['en'] }],
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
-            // e.loaded is a 0..1 fraction — there is no e.total in current builds.
+            // e.loaded is a 0..1 fraction — e.total exists but is always 1.
             progressEl.value = e.loaded;
             setStatus('Downloading Gemini Nano… ' + Math.round(e.loaded * 100) + '%', 'warn');
           });

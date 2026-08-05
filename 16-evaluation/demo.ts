@@ -15,7 +15,7 @@ interface DownloadMonitor {
 }
 
 interface SummarizerCreateOptions {
-  type?: 'tl;dr' | 'key-points' | 'teaser' | 'headline';
+  type?: 'tldr' | 'key-points' | 'teaser' | 'headline';
   format?: 'markdown' | 'plain-text';
   outputLanguage?: string;
   monitor?: (m: DownloadMonitor) => void;
@@ -77,7 +77,7 @@ interface EvalCase {
   /** Plain-language description of the rule the output must satisfy. */
   rule: string;
   /** Summarizer type, when api === 'summarizer'. */
-  summaryType?: 'tl;dr' | 'key-points' | 'teaser' | 'headline';
+  summaryType?: 'tldr' | 'key-points' | 'teaser' | 'headline';
   /** Deterministic scorer — regular code, no model involved. */
   check: (output: string) => CheckResult;
 }
@@ -102,7 +102,7 @@ const EVAL_CASES: EvalCase[] = [
     id: 'summary-short',
     name: 'Summary is short',
     api: 'summarizer',
-    summaryType: 'tl;dr',
+    summaryType: 'tldr',
     input: SAMPLE,
     rule: 'non-empty and ≤ 40 words',
     check: (o) => {
@@ -168,7 +168,8 @@ function errName(e: unknown, fallback: string): string {
   return (e as { name?: string } | null)?.name ?? fallback;
 }
 
-// Download progress -> a 0..1 fraction (there is no e.total in current builds).
+// Download progress -> a 0..1 fraction. e.total exists and is always 1, so
+// e.loaded is already the fraction to render as a percentage.
 let onProgress: (pct: number) => void = () => {};
 function monitor(m: DownloadMonitor): void {
   m.addEventListener('downloadprogress', (e: ProgressEvent) => onProgress(Math.round(e.loaded * 100)));
@@ -181,7 +182,7 @@ async function makeRunner(c: EvalCase): Promise<Runner> {
   if (c.api === 'summarizer') {
     if (typeof Summarizer === 'undefined') throw named('unavailable');
     const opts: SummarizerCreateOptions = {
-      type: c.summaryType ?? 'tl;dr',
+      type: c.summaryType ?? 'tldr',
       format: 'plain-text',
       outputLanguage: 'en',
     };

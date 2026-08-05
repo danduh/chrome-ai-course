@@ -10,28 +10,28 @@ Hosted demo: **[windowai.danduh.me/writer/writer-demo](https://windowai.danduh.m
 
 ## Heads up: these APIs are flag-gated
 
-Unlike the Summarizer, `Writer` and `Rewriter` are **not stable** — they're still
-origin-trial / behind a flag as of Chrome 150, and off by default. On most
+Unlike the Summarizer, `Writer` and `Rewriter` are **not stable** — they ran a
+joint origin trial through Chrome 148 and are still off by default. On most
 machines `availability()` returns `unavailable`, and the demo will tell you so.
-To try them for real, enable both flags and restart Chrome:
+To try them for real, enable the one shared flag and restart Chrome:
 
-- `chrome://flags/#writer-api-for-gemini-nano`
-- `chrome://flags/#rewriter-api-for-gemini-nano`
+- `chrome://flags/#writer-api-for-gemini-nano` (covers both APIs — there is no
+  separate Rewriter flag)
 - `chrome://flags/#optimization-guide-on-device-model` → **Enabled BypassPerfRequirement**
 
-Each panel degrades on its own, so if only one flag is set, the other panel still
-points you at the flag it needs.
+Each panel degrades on its own, so if the flag is off, both panels point you at
+it.
 
 ## What it shows
 
 - Two panels on one page — a **Writer** (draft from a brief) and a **Rewriter** (reshape existing text).
 - Feature-detecting each bare global and gating on its own `availability()` before `create()`.
 - Showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction).
-- Writer options `tone` / `format` / `length` plus an optional `sharedContext` frame.
+- Writer options `tone` / `format` / `length`, an optional `sharedContext` frame, and a per-call `context`.
 - Rewriter options `tone` / `length` / `format` (each defaulting to `as-is`) plus a per-call `context`.
 - Streaming with `writeStreaming()` / `rewriteStreaming()` and appending the deltas (`text += chunk`).
 - Recreating the instance per run (options can change) and calling `destroy()` on `beforeunload`.
-- Graceful degradation when an API is missing or `unavailable`, plus handling for `QuotaExceededError`, `NotSupportedError`, and `InvalidStateError`.
+- Graceful degradation when an API is missing or `unavailable`, plus handling for `QuotaExceededError`, `NotSupportedError`, and the `AbortError` you get from calling a destroyed instance.
 
 ## Files
 
@@ -56,11 +56,12 @@ Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- The two flags above enabled (Writer and Rewriter are prototype-only, not stable).
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a
-  non-metered connection for the one-time download.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS
+  (Platform 16389.0.0+) on Chromebook Plus devices. No Android or iOS.
+- The shared flag above enabled (Writer and Rewriter are prototype-only, not stable).
+- ~22 GB free disk gates the one-time download (the model is purged if free space
+  later falls below 10 GB), a GPU with more than 4 GB of VRAM — or the CPU path,
+  which needs 16 GB RAM and 4+ CPU cores — and a non-metered connection.
 - Built-in AI enabled. If the demo says an API is missing even with the flags on,
   work through
   [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).

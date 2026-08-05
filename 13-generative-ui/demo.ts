@@ -42,11 +42,12 @@ declare const LanguageModel: {
 };
 
 // --- MCP Apps (SEP-1865) tool-result shape ---
-// A UI-returning tool answers with model-readable `content` PLUS a
-// `_meta['ui.resourceUri']` the host resolves to sandboxed markup.
+// A UI-returning tool answers with model-readable `content` PLUS a nested
+// `_meta.ui.resourceUri` (an McpUiToolMeta object) the host resolves to sandboxed
+// markup. The old flat `_meta["ui/resourceUri"]` (with a slash) is deprecated.
 interface UIResource {
   content: Array<{ type: 'text'; text: string }>;
-  _meta: { 'ui.resourceUri': string };
+  _meta: { ui: { resourceUri: string } };
 }
 type ToolResult = UIResource | string;
 
@@ -169,7 +170,8 @@ function renderFormHtml(spec: FormSpec): string {
     '  e.preventDefault();',
     '  var values={};',
     '  new FormData(e.target).forEach(function(v,k){values[k]=v;});',
-    // JSON-RPC 2.0 envelope up to the host — same shape the shipped bridge uses.
+    // JSON-RPC 2.0 envelope up to the host. "ui/submit" is this demo's own name;
+    // real MCP Apps posts a tools/call back — same envelope, same source check.
     '  parent.postMessage({jsonrpc:"2.0",method:"ui/submit",params:{values:values}},"*");',
     '  var b=e.target.querySelector("button");b.textContent="Sent";b.disabled=true;',
     '},false);',
@@ -180,7 +182,7 @@ function renderFormHtml(spec: FormSpec): string {
 
 // --- Tools, keyed by name. renderForm RETURNS UI, not a string. ---
 const TOOLS: Record<string, (args: Record<string, unknown>) => ToolResult> = {
-  // MCP Apps shape: model-readable `content` + `_meta['ui.resourceUri']`.
+  // MCP Apps shape: model-readable `content` + nested `_meta.ui.resourceUri`.
   renderForm(args: Record<string, unknown>): UIResource {
     const spec: FormSpec = {
       title: args.title ? String(args.title) : 'Quick form',
@@ -195,7 +197,7 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => ToolResult> = {
     uiRegistry.set(uri, renderFormHtml(spec));
     return {
       content: [{ type: 'text', text: 'Rendered a form titled "' + spec.title + '".' }],
-      _meta: { 'ui.resourceUri': uri },
+      _meta: { ui: { resourceUri: uri } },
     };
   },
 };
@@ -265,7 +267,7 @@ async function createSession(
     expectedOutputs: [{ type: 'text', languages: ['en'] }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // e.loaded is a 0..1 fraction (e.total is always 1)
         setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
       });
     },
@@ -303,8 +305,9 @@ async function driveLoop(
 ): Promise<void> {
   let next = firstPrompt;
   for (let i = 0; i < MAX_STEPS; i++) {
-    // Invariant: the literal ui:// must NEVER reach session.prompt().
-    console.assert(next.indexOf('ui://') === -1, 'ui:// leaked into the model prompt');
+    // Invariant, actually enforced: the literal ui:// must NEVER reach
+    // session.prompt(). console.assert only logs, so throw to really block it.
+    if (next.indexOf('ui://') !== -1) throw new Error('ui:// leaked into the model prompt');
 
     // responseConstraint rides on each prompt(), not create().
     const raw = await session.prompt(next, { responseConstraint: INTENT_SCHEMA });
@@ -332,11 +335,11 @@ async function driveLoop(
 
     const result = tool(args);
 
-    // MCP Apps interceptor: an object result carrying _meta['ui.resourceUri']
+    // MCP Apps interceptor: an object result carrying _meta.ui.resourceUri
     // is a UI resource; a plain string is an ordinary tool result.
     let back: string;
     if (typeof result === 'object') {
-      const uri = result._meta['ui.resourceUri'];
+      const uri = result._meta.ui.resourceUri;
       renderResource(uri);
       // Feed back ONLY { content } — the ui:// URI is intentionally stripped.
       back = JSON.stringify({ content: result.content });
@@ -380,7 +383,7 @@ async function runAgent(): Promise<void> {
 // --- Part 2: render the same tool output with no model at all. ---
 function showCanned(): void {
   const result = TOOLS.renderForm({ title: 'Book a demo slot', submitLabel: 'Book it' });
-  const uri = (result as UIResource)._meta['ui.resourceUri'];
+  const uri = (result as UIResource)._meta.ui.resourceUri;
   logEvent('canned', 'called renderForm() directly, got ' + uri);
   renderResource(uri);
   replyEl.textContent = '';

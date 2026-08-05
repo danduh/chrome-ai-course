@@ -114,7 +114,7 @@
         id: 'summary-short',
         name: 'Summary is short',
         api: 'summarizer',
-        summaryType: 'tl;dr',
+        summaryType: 'tldr',
         input: SAMPLE,
         rule: 'non-empty and \u2264 40 words',
         check: (o) => {
@@ -197,7 +197,7 @@
     // expectedInputs/expectedOutputs.
     function optsFor(c) {
       if (c.api === 'summarizer')
-        return { type: c.summaryType || 'tl;dr', format: 'plain-text', outputLanguage: 'en' };
+        return { type: c.summaryType || 'tldr', format: 'plain-text', outputLanguage: 'en' };
       if (c.api === 'translator') return { sourceLanguage: 'en', targetLanguage: 'es' };
       return {
         expectedInputs: [{ type: 'text', languages: ['en'] }],

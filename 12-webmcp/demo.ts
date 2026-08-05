@@ -51,14 +51,13 @@ interface ModelContextTool {
 }
 
 interface ModelContextRegisterToolOptions {
-  signal?: AbortSignal; // abort to unregister — portable across Chrome 146-150
+  signal?: AbortSignal; // abort to unregister — the only teardown path
 }
 
 interface ModelContext {
-  registerTool(tool: ModelContextTool, options?: ModelContextRegisterToolOptions): void;
-  // Chrome 150+ only — the AbortSignal path above works everywhere.
-  unregisterTool?(name: string): void;
-  clearContext?(): void;
+  // Returns a Promise that REJECTS with InvalidStateError on a duplicate name.
+  // There is no unregisterTool() and no clearContext(); the AbortSignal is it.
+  registerTool(tool: ModelContextTool, options?: ModelContextRegisterToolOptions): Promise<void>;
 }
 
 interface Document {
@@ -194,21 +193,26 @@ const CART_TOOLS: ModelContextTool[] = [
 ];
 
 // --- Register every tool under one AbortController. controller.abort()
-// unregisters the whole set (portable across Chrome 146-150). -----------------
-const DUPLICATE_NAME_PATTERN = /duplicate tool name|already registered/i;
+// unregisters the whole set — the AbortSignal is the only teardown path. -------
+function isDuplicateName(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  return e.name === 'InvalidStateError' || /duplicate tool name/i.test(e.message);
+}
 
-function registerTools(): number {
+async function registerTools(): Promise<number> {
   const mc = modelContext;
   if (!mc) return 0;
   controller = new AbortController();
   let registered = 0;
   for (const tool of CART_TOOLS) {
     try {
-      mc.registerTool(tool, { signal: controller.signal });
+      // registerTool returns a Promise that REJECTS on a duplicate name — await
+      // it so the rejection is catchable; a synchronous try/catch would miss it.
+      await mc.registerTool(tool, { signal: controller.signal });
       registered++;
     } catch (e) {
-      // Double-register throws "duplicate tool name" — treat as already-there.
-      if (DUPLICATE_NAME_PATTERN.test(e instanceof Error ? e.message : '')) {
+      // Duplicate name rejects with InvalidStateError — treat as already-there.
+      if (isDuplicateName(e)) {
         registered++;
         continue;
       }
@@ -317,7 +321,7 @@ async function getSession(): Promise<LanguageModelSession> {
     initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // e.loaded is a 0..1 fraction (e.total is always 1)
         setStatus('Downloading model\u2026 ' + Math.round(e.loaded * 100) + '%', 'warn');
       });
     },
@@ -444,7 +448,7 @@ async function init(): Promise<void> {
       '">hosted demo</a>.';
   } else {
     try {
-      const count = registerTools();
+      const count = await registerTools();
       renderTools(count);
     } catch (e) {
       renderTools(0);
@@ -467,7 +471,12 @@ async function init(): Promise<void> {
   }
   let status: Availability;
   try {
-    status = await LanguageModel.availability();
+    // Pass availability() the SAME options you pass to create() so the check
+    // matches the session you'll actually build.
+    status = await LanguageModel.availability({
+      expectedInputs:  [{ type: 'text', languages: ['en'] }],
+      expectedOutputs: [{ type: 'text', languages: ['en'] }],
+    });
   } catch (e) {
     setStatus('<code>availability()</code> threw: ' + errMessage(e) + '.', 'err');
     return;

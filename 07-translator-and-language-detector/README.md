@@ -46,10 +46,11 @@ Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
+- **Desktop Chrome** on Windows, macOS, Linux, or ChromeOS (Chromebook Plus).
+  The docs say these APIs run on desktop, not on mobile — so no Android or iOS.
 - The Translator and Language Detector are stable in Chrome since 138, so on
   current stable they need no flags. Each `(source, target)` language pair
-  downloads its own pack (typically 10–50 MB) on first use; the status line
+  downloads its own pack (tens of megabytes) on first use; the status line
   shows progress. A non-metered connection helps for that first download.
 - Built-in AI enabled. If the demo says the API is missing, work through
   [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).

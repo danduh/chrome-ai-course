@@ -100,7 +100,7 @@
         setStatus('Gemini Nano is ready. Click to run one prompt.', 'ok');
       } else {
         // "downloadable" | "downloading" — first create() will fetch the model.
-        setStatus('Model needs a one-time download (~4 GB). Click to start — progress shows below.', 'warn');
+        setStatus('Model needs a one-time download (a few GB). Click to start — progress shows below.', 'warn');
       }
     }
 
@@ -117,7 +117,7 @@
           expectedOutputs: [{ type: 'text', languages: ['en'] }],
           monitor(m) {
             m.addEventListener('downloadprogress', (e) => {
-              // e.loaded is a 0..1 fraction — there is no e.total in current builds.
+              // e.loaded is a 0..1 fraction; e.total exists and is always 1.
               const pct = Math.round(e.loaded * 100);
               progressWrap.hidden = false;
               progressEl.value = pct;
@@ -139,7 +139,7 @@
       } catch (err) {
         setStatus('Something went wrong: ' + err.message, 'err');
       } finally {
-        // 5) Free the GPU memory. One-shot demo, so destroy right after.
+        // 5) Free the model's memory sooner than GC would. One-shot demo, so destroy right after.
         if (session) {
           session.destroy();
           session = null;

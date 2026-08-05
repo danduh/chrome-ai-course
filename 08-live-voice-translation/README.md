@@ -42,9 +42,9 @@ listening** and allow the microphone when prompted.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS. Firefox and iOS Safari don't ship the Web Speech API.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform 16389.0.0+) on Chromebook Plus devices — no Android or iOS. Firefox doesn't ship the Web Speech API enabled; Safari does (Siri-backed `webkitSpeechRecognition`, Safari 14.1 / iOS 14.5+), but the on-device `Translator` is Chrome-only, so run the demo in Chrome.
 - **A microphone**, and permission to use it. The first Start triggers Chrome's permission prompt — allow it from the address bar if you dismissed it.
-- The `Translator` is stable in Chrome since 138, so on current stable it needs no flags. Each `(source, target)` language pair downloads its own pack (typically 10–50 MB) on first use; the status line shows progress.
+- The `Translator` is stable in Chrome since 138, so on current stable it needs no flags. Each `(source, target)` language pair downloads its own pack (tens of megabytes) on first use; the status line shows progress.
 - Built-in AI enabled. If the demo says the API is missing, work through
   [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).
 

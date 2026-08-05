@@ -10,10 +10,10 @@ Hosted demo: **[windowai.danduh.me/chat/chat-demo](https://windowai.danduh.me/ch
 
 ## What it shows
 
-- Feature-detecting `LanguageModel` and gating on `availability()` before `create()`.
+- Feature-detecting `LanguageModel` and gating on `availability()` before `create()`, passing the same `expectedInputs`/`expectedOutputs` to both.
 - Showing first-run download progress with a `monitor` (`e.loaded` is a 0..1 fraction).
 - Creating a session with `initialPrompts` (a `system` message at index 0), declaring languages with `expectedInputs`/`expectedOutputs`.
-- Seeding the `temperature` and `topK` inputs from `LanguageModel.params()` when the runtime exposes it.
+- Seeding `temperature` and `topK` from `LanguageModel.params()` when it's exposed (Extensions / Origin Trial only), disabling the inputs and skipping the options otherwise.
 - Streaming the reply with `promptStreaming()` and appending the deltas (`text += chunk`).
 - A live `contextUsage` / `contextWindow` token readout after each turn.
 - A "Reset session" button that calls `destroy()` and recreates the session with the current settings.
@@ -40,10 +40,12 @@ Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a
-  non-metered connection for the one-time download.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform
+  16389.0.0+) on Chromebook Plus devices — no Android or iOS.
+- ~22 GB free disk to start the download (Chrome removes the model if free space
+  later falls below 10 GB); either a GPU with more than 4 GB of VRAM, or a CPU
+  path with 16 GB of RAM and 4+ CPU cores; and a non-metered connection for the
+  one-time download.
 - Built-in AI enabled. On current stable Chrome the core Prompt API needs no
   flags — the model downloads on first `create()`. If the demo says the API is
   missing, work through

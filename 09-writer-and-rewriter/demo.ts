@@ -4,7 +4,7 @@
 // built or loaded by the page. The @types/dom-chromium-ai package ships fuller
 // declarations; the minimal ambient surface below keeps this file self-contained.
 
-// --- Minimal ambient surface for Chrome's Writer + Rewriter APIs (flag-gated as of Chrome 150) ---
+// --- Minimal ambient surface for Chrome's Writer + Rewriter APIs (flag-gated; joint origin trial ran through Chrome 148) ---
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
 
 // Writer vocabulary.
@@ -89,6 +89,7 @@ interface ToolConfig {
     format: string;
     length: string;
     extra: string;
+    context?: string;
     run: string;
     output: string;
   };
@@ -139,6 +140,9 @@ function setupTool(cfg: ToolConfig): ToolHandle {
   const formatEl = document.getElementById(cfg.ids.format) as HTMLSelectElement;
   const lengthEl = document.getElementById(cfg.ids.length) as HTMLSelectElement;
   const extraEl = document.getElementById(cfg.ids.extra) as HTMLInputElement;
+  const contextEl = cfg.ids.context
+    ? (document.getElementById(cfg.ids.context) as HTMLInputElement)
+    : null;
   const runBtn = document.getElementById(cfg.ids.run) as HTMLButtonElement;
   const outputEl = document.getElementById(cfg.ids.output) as HTMLDivElement;
 
@@ -221,7 +225,7 @@ function setupTool(cfg: ToolConfig): ToolHandle {
       ...buildCreateOptions(),
       monitor(m: DownloadMonitor) {
         m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-          dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+          dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
           setStatus(
             statusEl,
             'Downloading model… ' + Math.round(e.loaded * 100) + '%',
@@ -235,10 +239,14 @@ function setupTool(cfg: ToolConfig): ToolHandle {
     return created;
   }
 
-  // Writer streams from the brief; Rewriter streams the transform, with a per-call context.
+  // Both stream with an optional per-call context: Writer from the brief, Rewriter the transform.
   function startStream(text: string): ReadableStream<string> {
     if (cfg.kind === 'writer') {
-      return (instance as WriterInstance).writeStreaming(text);
+      const context = contextEl ? contextEl.value.trim() : '';
+      return (instance as WriterInstance).writeStreaming(
+        text,
+        context ? { context } : undefined,
+      );
     }
     const context = extraEl.value.trim();
     return (instance as RewriterInstance).rewriteStreaming(
@@ -277,8 +285,8 @@ function setupTool(cfg: ToolConfig): ToolHandle {
           'sections and run them one at a time.';
       } else if (name === 'NotSupportedError') {
         outputEl.textContent =
-          'That tone/format/length combo is not supported here (NotSupportedError). Try another.';
-      } else if (name === 'InvalidStateError') {
+          'This configuration can\'t run here (NotSupportedError) — usually an unsupported language. Try another.';
+      } else if (name === 'AbortError') {
         outputEl.textContent = 'That instance was destroyed. Run again to recreate it.';
         instance = null;
       } else {
@@ -313,6 +321,7 @@ const writerTool = setupTool({
     format: 'w-format',
     length: 'w-length',
     extra: 'w-shared',
+    context: 'w-context',
     run: 'w-run',
     output: 'w-output',
   },
@@ -321,7 +330,7 @@ const writerTool = setupTool({
 const rewriterTool = setupTool({
   kind: 'rewriter',
   apiName: 'Rewriter',
-  flag: '#rewriter-api-for-gemini-nano',
+  flag: '#writer-api-for-gemini-nano',
   ids: {
     status: 'r-status',
     dl: 'r-dl',

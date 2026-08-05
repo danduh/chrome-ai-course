@@ -9,10 +9,10 @@ Lesson: **[Multimodal: image input](https://danduh.me/courses/chrome-built-in-ai
 
 ## What it shows
 
-- Probing multimodal support with `LanguageModel.availability({ expectedInputs: [{ type: 'image' }] })`, wrapped in try/catch (older builds throw on the option).
+- Probing multimodal support with `LanguageModel.availability({ expectedInputs: [{ type: 'image' }] })`, wrapped in try/catch (a build that doesn't recognise the option may throw).
 - Opting a session into images with `expectedInputs` at `create()` — the option that loads the vision tower — plus a `monitor` for first-run download progress.
 - Getting a `Blob` three ways: a file picker, drag-and-drop, and clipboard paste.
-- Downsampling to a 512px tile with a canvas and `canvas.toBlob` (null-checked).
+- Downsampling to 512px on the long side with a canvas and `canvas.toBlob` (null-checked).
 - Prompting with role-wrapped content parts — `[{ role: 'user', content: [{ type: 'text', value }, { type: 'image', value: blob }] }]` — and streaming the reply as deltas.
 - Reusing one session and calling `destroy()` on teardown.
 
@@ -38,7 +38,7 @@ image, and ask.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform 16389.0.0+) on Chromebook Plus devices. No Android or iOS.
 - Built-in AI available, with **image input** supported. The first question may
   trigger the one-time Gemini Nano download (several GB) — the demo shows a
   progress bar while it runs.
@@ -48,6 +48,6 @@ image, and ask.
 ## Notes
 
 Gemini Nano is a generalist. It's good at "roughly what's in this picture" and
-weak at dense or handwritten text, counting past ~10, and faces. For exact
+weak at dense or handwritten text, counting a crowd of things, and faces. For exact
 counts, precise coordinates, OCR of handwriting, or recognising a specific
 person, use a specialised model.

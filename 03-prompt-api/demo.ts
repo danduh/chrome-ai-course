@@ -63,12 +63,22 @@ const SETUP_URL =
   'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
 const LIVE_DEMO_URL = 'https://windowai.danduh.me/chat/chat-demo';
 const DEFAULT_SYSTEM = 'You are a concise, friendly assistant.';
+// Declare the modalities/languages once and pass the SAME object to both
+// availability() and create() — availability() only answers for what you'll use.
+const EXPECTATIONS: Pick<
+  LanguageModelCreateOptions,
+  'expectedInputs' | 'expectedOutputs'
+> = {
+  expectedInputs:  [{ type: 'text', languages: ['en'] }],
+  expectedOutputs: [{ type: 'text', languages: ['en'] }],
+};
 
 const statusEl = document.getElementById('status') as HTMLDivElement;
 const dlEl = document.getElementById('dl') as HTMLProgressElement;
 const systemEl = document.getElementById('system') as HTMLInputElement;
 const tempEl = document.getElementById('temp') as HTMLInputElement;
 const topkEl = document.getElementById('topk') as HTMLInputElement;
+const paramNoteEl = document.getElementById('paramNote') as HTMLSpanElement;
 const promptEl = document.getElementById('prompt') as HTMLTextAreaElement;
 const sendBtn = document.getElementById('send') as HTMLButtonElement;
 const resetBtn = document.getElementById('reset') as HTMLButtonElement;
@@ -77,6 +87,9 @@ const outputEl = document.getElementById('output') as HTMLDivElement;
 
 let session: LanguageModelSession | null = null;
 let busy = false;
+// temperature/topK only apply to Extensions / the Origin Trial, where params()
+// exists. On a plain web page they're ignored, so we don't send them.
+let tuningSupported = false;
 
 function setStatus(html: string, kind?: 'ok' | 'warn' | 'err'): void {
   statusEl.className = 'status' + (kind ? ' ' + kind : '');
@@ -116,7 +129,7 @@ async function init(): Promise<void> {
 
   let status: Availability;
   try {
-    status = await LanguageModel.availability();
+    status = await LanguageModel.availability(EXPECTATIONS);
   } catch (e) {
     degrade('<code>availability()</code> threw: ' + errName(e) + '.');
     return;
@@ -127,7 +140,9 @@ async function init(): Promise<void> {
     return;
   }
 
-  // Seed temperature/topK from params() when the runtime exposes it.
+  // Seed temperature/topK from params() when the runtime exposes it. params()
+  // only exists for Extensions / the Origin Trial — the only contexts where
+  // these knobs do anything. Elsewhere, disable the inputs and don't pass them.
   if (typeof LanguageModel.params === 'function') {
     try {
       const params = await LanguageModel.params();
@@ -136,10 +151,18 @@ async function init(): Promise<void> {
         tempEl.max = String(params.maxTemperature);
         topkEl.value = String(params.defaultTopK);
         topkEl.max = String(params.maxTopK);
+        tuningSupported = true;
       }
     } catch {
-      // params() present but threw — keep the input defaults.
+      // params() present but threw — keep the input defaults, leave tuning off.
     }
+  }
+
+  if (!tuningSupported) {
+    tempEl.disabled = true;
+    topkEl.disabled = true;
+    paramNoteEl.textContent =
+      'temperature / topK apply only to Extensions or the Origin Trial — ignored here';
   }
 
   if (status === 'available') {
@@ -159,29 +182,34 @@ async function ensureSession(): Promise<LanguageModelSession> {
   if (session) return session;
 
   const systemText = systemEl.value.trim() || DEFAULT_SYSTEM;
-  const temperature = Number(tempEl.value);
-  const topK = Number(topkEl.value);
 
   dlEl.hidden = false;
   dlEl.value = 0;
   setStatus('Preparing the model…', 'warn');
 
-  session = await LanguageModel.create({
-    expectedInputs:  [{ type: 'text', languages: ['en'] }],
-    expectedOutputs: [{ type: 'text', languages: ['en'] }],
-    temperature: Number.isFinite(temperature) ? temperature : undefined,
-    topK: Number.isFinite(topK) ? topK : undefined,
+  const options: LanguageModelCreateOptions = {
+    ...EXPECTATIONS,
     initialPrompts: [{ role: 'system', content: systemText }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
         setStatus(
           'Downloading model… ' + Math.round(e.loaded * 100) + '%',
           'warn',
         );
       });
     },
-  });
+  };
+
+  // Only pass temperature/topK where they actually apply (Extensions / OT).
+  if (tuningSupported) {
+    const temperature = Number(tempEl.value);
+    const topK = Number(topkEl.value);
+    if (Number.isFinite(temperature)) options.temperature = temperature;
+    if (Number.isFinite(topK)) options.topK = topK;
+  }
+
+  session = await LanguageModel.create(options);
 
   dlEl.hidden = true;
   setStatus('Model ready.', 'ok');
@@ -210,7 +238,7 @@ async function send(): Promise<void> {
     if (name === 'QuotaExceededError') {
       outputEl.textContent =
         'Context window is full (QuotaExceededError). Reset the session, then try a shorter prompt.';
-    } else if (name === 'InvalidStateError') {
+    } else if (name === 'AbortError') {
       outputEl.textContent = 'That session was destroyed. Resetting…';
       session = null;
     } else {

@@ -34,16 +34,18 @@ Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 ## Requirements
 
-- Desktop Chrome (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with over 4 GB VRAM (or a 16 GB-RAM tier machine), and a non-metered
-  connection for the one-time download.
+- Desktop Chrome on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform
+  16389.0.0+) on Chromebook Plus. No Android or iOS.
+- 22 GB free disk to start the one-time download (the model is purged if free
+  space later falls below 10 GB). Either a GPU with more than 4 GB of VRAM, or
+  16 GB of RAM and 4+ CPU cores for the CPU path. A non-metered connection for
+  the download.
 - Built-in AI enabled. If `availability()` returns `unavailable`, work through
   [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).
 
 ## What to expect
 
-On first run, Gemini Nano downloads (~4 GB) and the progress bar tracks it —
-`create()` does not resolve until the download finishes. After that, sessions
-warm up in about 300 ms and the answer streams in. The session is destroyed as
-soon as the answer completes.
+On first run, Gemini Nano downloads (a few GB) and the progress bar tracks it —
+`create()` does not resolve until the download finishes. After that, a session
+warms up in a fraction of a second and the answer streams in. The session is
+destroyed as soon as the answer completes.

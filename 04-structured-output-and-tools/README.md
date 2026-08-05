@@ -18,9 +18,11 @@ Hosted demo: **[windowai.danduh.me/tool-calling/tool-calling-demo](https://windo
 - Declaring the session languages with `expectedInputs`/`expectedOutputs` on every `create()`, and `destroy()` on `beforeunload`.
 - Graceful degradation when the API is missing or `unavailable`.
 
-The intent loop is the reliable path because native `tools` was unreliable on
-recent Canary builds (`Tool use feature not enabled`); the loop leans only on
-`responseConstraint`. The lesson covers both.
+The intent loop is the tool-calling pattern that runs today. The Prompt API
+explainer sketches a native `tools` option on `create()`, but Chrome hasn't wired
+it up on-device — pass it and the model ignores your functions or the on-device
+process crashes — so the loop, which leans only on the shipped `responseConstraint`,
+is the real path. This lesson teaches it.
 
 ## Files
 
@@ -43,10 +45,12 @@ Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a
-  non-metered connection for the one-time download.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS
+  (Platform 16389.0.0+) on Chromebook Plus devices. No Android or iOS.
+- ~22 GB free disk to start the download (Chrome removes the model if free space
+  later drops below 10 GB), a GPU with more than 4 GB of VRAM — or, on the CPU
+  path, 16 GB of RAM and 4-plus CPU cores — and a non-metered connection for the
+  one-time download.
 - Built-in AI enabled. On current stable Chrome the core Prompt API needs no
   flags — the model downloads on first `create()`. If the demo says the API is
   missing, work through

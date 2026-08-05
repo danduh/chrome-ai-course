@@ -77,7 +77,18 @@ const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/mcp-client';
 const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
 const LIVE_DEMO_URL = 'https://windowai.danduh.me/mcp-client';
 const MAX_TOOL_CALLS = 8;
-const PROTOCOL_VERSION = '2025-06-18';
+// Modern MCP (revision 2026-07-28): no initialize handshake, no protocol-level
+// session. Every request declares this version in its _meta and (over HTTP) in
+// an MCP-Protocol-Version header.
+const PROTOCOL_VERSION = '2026-07-28';
+const CLIENT_INFO = { name: 'chrome-ai-course-mcp-client', version: '0.1.0' };
+
+// The same language options go to availability() and create() — a narrower
+// availability() answer than the option-less call would give.
+const LANGUAGE_OPTS = {
+  expectedInputs: [{ type: 'text' as const, languages: ['en'] }],
+  expectedOutputs: [{ type: 'text' as const, languages: ['en'] }],
+};
 
 const statusEl = document.getElementById('status') as HTMLDivElement;
 const dlEl = document.getElementById('dl') as HTMLProgressElement;
@@ -268,31 +279,37 @@ function mockHandle(request: JsonRpcRequest): JsonRpcResponse | null {
   const id = request.id;
   const method = request.method;
   const params = (request.params || {}) as Record<string, unknown>;
-  const ok = (result: unknown): JsonRpcResponse => ({ jsonrpc: '2.0', id, result });
+  // Modern results carry a resultType; "complete" is the ordinary terminal one.
+  const ok = (result: Record<string, unknown>): JsonRpcResponse =>
+    ({ jsonrpc: '2.0', id, result: Object.assign({ resultType: 'complete' }, result) });
 
-  if (method === 'initialize') {
+  // server/discover reports identity, capabilities and supported versions in one
+  // request — the modern replacement for the initialize handshake.
+  if (method === 'server/discover') {
     return ok({
-      protocolVersion: PROTOCOL_VERSION,
+      supportedVersions: [PROTOCOL_VERSION],
       capabilities: { tools: {} },
-      serverInfo: { name: 'mock-mcp-server', version: '0.1.0' },
+      instructions: 'A tiny in-page MCP server: add, multiply, echo.',
+      _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'mock-mcp-server', version: '0.1.0' } },
     });
   }
-  if (method === 'notifications/initialized') return null; // notification: no reply
   if (method === 'tools/list') return ok({ tools: MOCK_TOOLS });
   if (method === 'tools/call') {
     const name = params.name as string;
     const args: any = params.arguments || {}; // model-supplied; any for arithmetic/concat
     if (name === 'add') {
-      return ok({ content: [{ type: 'text', text: `The sum of ${args.a} and ${args.b} is ${Number(args.a) + Number(args.b)}.` }] });
+      return ok({ content: [{ type: 'text', text: `The sum of ${args.a} and ${args.b} is ${Number(args.a) + Number(args.b)}.` }], isError: false });
     }
     if (name === 'multiply') {
-      return ok({ content: [{ type: 'text', text: `The product of ${args.a} and ${args.b} is ${Number(args.a) * Number(args.b)}.` }] });
+      return ok({ content: [{ type: 'text', text: `The product of ${args.a} and ${args.b} is ${Number(args.a) * Number(args.b)}.` }], isError: false });
     }
     if (name === 'echo') {
-      return ok({ content: [{ type: 'text', text: `Echo: ${args.message}` }] });
+      return ok({ content: [{ type: 'text', text: `Echo: ${args.message}` }], isError: false });
     }
-    return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true } };
+    return ok({ content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true });
   }
+  // Unknown method — a real modern server answers this over HTTP with 404 + this
+  // same JSON-RPC -32601 body.
   return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
 }
 
@@ -305,58 +322,78 @@ function makeMockTransport(): Transport {
 }
 
 // --- Remote transport: raw JSON-RPC over Streamable HTTP via fetch. ---
+// Modern MCP is stateless — no session id to capture or echo. The client names
+// its protocol version on every request (body _meta + header) and bumps it once
+// if the server rejects it with UnsupportedProtocolVersionError.
 function makeHttpTransport(opts: { url: string; token: string; proxyPrefix: string }): Transport {
   const endpoint = opts.proxyPrefix ? opts.proxyPrefix + opts.url : opts.url;
-  let sessionId: string | null = null; // captured from the initialize response header
   let protocolVersion = PROTOCOL_VERSION;
 
   return {
     label: 'http',
-    close: () => { sessionId = null; },
+    close: () => { /* stateless: nothing to tear down */ },
     send: async (request) => {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        // Streamable HTTP servers may answer with JSON or an SSE stream.
-        Accept: 'application/json, text/event-stream',
+      // One POST at a given version. The body _meta version and the
+      // MCP-Protocol-Version header MUST agree, so stamp both from `version`.
+      const attempt = async (version: string): Promise<{ res: Response; body: string }> => {
+        setRequestVersion(request, version);
+        const p = (request.params || {}) as Record<string, any>;
+        const name = p.name || p.uri; // params.name / params.uri drive the Mcp-Name mirror
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          // Streamable HTTP servers may answer with JSON or an SSE stream.
+          Accept: 'application/json, text/event-stream',
+          'MCP-Protocol-Version': version, // exact casing; mirrors _meta
+          'Mcp-Method': request.method,    // mirror header intermediaries can route on
+        };
+        if (name) headers['Mcp-Name'] = String(name); // required for tools/call
+        if (opts.token) headers['Authorization'] = 'Bearer ' + opts.token;
+        const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(request) });
+        return { res, body: await res.text() };
       };
-      if (sessionId) {
-        headers['Mcp-Session-Id'] = sessionId;
-        headers['Mcp-Protocol-Version'] = protocolVersion;
+
+      let { res, body } = await attempt(protocolVersion);
+
+      // Version mismatch is a 400 carrying UnsupportedProtocolVersionError
+      // (-32022). Pick a mutually supported version and retry once.
+      if (res.status === 400 && body) {
+        const errObj = safeParse(body);
+        if (errObj && errObj.error && errObj.error.code === -32022) {
+          const supported: string[] = (errObj.error.data && errObj.error.data.supported) || [];
+          const pick = supported.indexOf(PROTOCOL_VERSION) !== -1 ? PROTOCOL_VERSION : supported[0];
+          if (!pick) throw new Error('No mutually supported MCP protocol version. Server supports: ' + supported.join(', '));
+          protocolVersion = pick;
+          ({ res, body } = await attempt(protocolVersion));
+        }
       }
-      if (opts.token) headers['Authorization'] = 'Bearer ' + opts.token;
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(request),
-      });
-
-      // The session id rides back on the initialize response. Cross-origin, the
-      // server MUST list Mcp-Session-Id in Access-Control-Expose-Headers or the
-      // browser hides it and later requests fail with "missing session".
-      const sid = res.headers.get('Mcp-Session-Id');
-      if (sid) sessionId = sid;
 
       if (!res.ok && res.status !== 202) {
-        const body = await res.text().catch(() => '');
         throw new Error('HTTP ' + res.status + (body ? ': ' + body.slice(0, 200) : ''));
       }
 
-      const msg = await readRpc(res);
+      const msg = parseRpcBody(res, body);
       if (msg && msg.error) throw new Error(msg.error.message || 'JSON-RPC error');
-      if (request.method === 'initialize' && msg && msg.result && msg.result.protocolVersion) {
-        protocolVersion = msg.result.protocolVersion as string;
-      }
       return msg;
     },
   };
 }
 
-// Read a JSON-RPC response that may arrive as JSON or as an SSE frame.
-async function readRpc(res: Response): Promise<JsonRpcResponse | null> {
+// Stamp the negotiated protocol version into the request body's _meta so it
+// always matches the MCP-Protocol-Version header on the same POST.
+function setRequestVersion(request: JsonRpcRequest, version: string): void {
+  const params = (request.params || {}) as Record<string, any>;
+  params._meta = Object.assign({}, params._meta, { 'io.modelcontextprotocol/protocolVersion': version });
+  (request as any).params = params;
+}
+
+function safeParse(text: string): any {
+  try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+// Parse a JSON-RPC response that may arrive as JSON or as an SSE frame.
+function parseRpcBody(res: Response, body: string): JsonRpcResponse | null {
+  if (!body) return null; // 202 Accepted — no body
   const ct = (res.headers.get('content-type') || '').toLowerCase();
-  const body = await res.text();
-  if (!body) return null; // 202 Accepted — a notification, no body
   if (ct.indexOf('text/event-stream') !== -1) {
     const data = body.split(/\r?\n/)
       .filter((l) => l.indexOf('data:') === 0)
@@ -371,23 +408,24 @@ async function readRpc(res: Response): Promise<JsonRpcResponse | null> {
 // MCP client methods — the same for every transport.
 // =====================================================================
 
-function rpc(t: Transport, method: string, params: unknown): Promise<JsonRpcResponse | null> {
-  return t.send({ jsonrpc: '2.0', id: ++rpcId, method, params });
+// Every modern request carries protocol metadata in _meta: the version the
+// server reads cold, who's calling, and what the client supports.
+function requestMeta(): Record<string, unknown> {
+  return {
+    'io.modelcontextprotocol/protocolVersion': PROTOCOL_VERSION,
+    'io.modelcontextprotocol/clientInfo': CLIENT_INFO,
+    'io.modelcontextprotocol/clientCapabilities': {},
+  };
 }
-function notify(t: Transport, method: string, params: unknown): Promise<JsonRpcResponse | null> {
-  return t.send({ jsonrpc: '2.0', method, params });
+function rpc(t: Transport, method: string, params: Record<string, unknown>): Promise<JsonRpcResponse | null> {
+  return t.send({ jsonrpc: '2.0', id: ++rpcId, method, params: Object.assign({}, params, { _meta: requestMeta() }) });
 }
 
-// initialize -> notifications/initialized -> tools/list.
+// Modern connect: server/discover (identity + capabilities) then tools/list.
+// No initialize, no notifications/initialized, no session to open.
 async function connectTransport(t: Transport): Promise<McpConnection> {
-  const initRes = await rpc(t, 'initialize', {
-    protocolVersion: PROTOCOL_VERSION,
-    capabilities: {},
-    clientInfo: { name: 'chrome-ai-course-mcp-client', version: '0.1.0' },
-  });
-  const info = (initRes && initRes.result) || {};
-  // The handshake isn't complete until the client sends this notification.
-  await notify(t, 'notifications/initialized', {});
+  const discRes = await rpc(t, 'server/discover', {});
+  const disc = (discRes && discRes.result) || {};
   const listRes = await rpc(t, 'tools/list', {});
   const rawTools: any[] = (listRes && listRes.result && listRes.result.tools) || [];
   const tools: McpToolInfo[] = rawTools.map((x) => ({
@@ -395,10 +433,12 @@ async function connectTransport(t: Transport): Promise<McpConnection> {
     description: x.description || '',
     inputSchema: x.inputSchema || { type: 'object' },
   }));
+  // Modern serverInfo rides in the result's _meta, not a top-level field.
+  const serverInfo = (disc._meta && disc._meta['io.modelcontextprotocol/serverInfo']) || {};
   return {
-    serverName: (info.serverInfo && info.serverInfo.name) || 'unknown',
-    serverVersion: (info.serverInfo && info.serverInfo.version) || '',
-    capabilities: Object.keys(info.capabilities || {}),
+    serverName: serverInfo.name || 'unknown',
+    serverVersion: serverInfo.version || '',
+    capabilities: Object.keys(disc.capabilities || {}),
     tools,
   };
 }
@@ -422,12 +462,11 @@ async function getAgentSession(tools: McpToolInfo[]): Promise<LanguageModelSessi
   dlEl.hidden = false;
   dlEl.value = 0;
   agentSession = await LanguageModel.create({
-    expectedInputs:  [{ type: 'text', languages: ['en'] }],
-    expectedOutputs: [{ type: 'text', languages: ['en'] }],
+    ...LANGUAGE_OPTS,
     initialPrompts: [{ role: 'system', content: buildSystemPrompt(tools) }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // e.loaded is a 0..1 fraction; e.total is always 1
         setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
       });
     },
@@ -513,8 +552,9 @@ async function handleConnect(): Promise<void> {
   } catch (e) {
     let hint = '';
     if (mode === 'remote') {
-      hint = ' Browser → remote MCP is CORS-gated: the server must allow this origin and expose ' +
-        '<code>Mcp-Session-Id</code>. Try the mock server, or run a CORS proxy and use the prefix field.';
+      hint = ' Browser → remote MCP is CORS-gated: the server must allow this origin and the ' +
+        '<code>MCP-Protocol-Version</code>/<code>Mcp-Method</code>/<code>Mcp-Name</code> headers in its ' +
+        'preflight. Try the mock server, or run a CORS proxy and use the prefix field.';
     }
     connEl.innerHTML = '<span style="color:#d44">Connect failed: ' + escapeHtml(errMessage(e)) + '</span>' + hint;
     setStatus('Connect failed.', 'err');
@@ -626,7 +666,8 @@ async function initNano(): Promise<void> {
   }
   let status: Availability;
   try {
-    status = await LanguageModel.availability();
+    // Same options as create() — availability() answers for this exact request.
+    status = await LanguageModel.availability(LANGUAGE_OPTS);
   } catch (e) {
     nanoReady = false;
     setStatus('Ready to connect. <code>availability()</code> threw, so the agent step is disabled.', 'warn');

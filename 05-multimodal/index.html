@@ -86,8 +86,8 @@
       statusEl.textContent = msg;
     }
 
-    // Probe multimodal availability. Older builds throw on the option —
-    // catch it and report "unavailable" rather than exploding.
+    // Probe multimodal availability. A build that doesn't recognise the option
+    // may throw — catch it and report "unavailable" rather than exploding.
     async function getMultimodalAvailability() {
       if (typeof LanguageModel === 'undefined') return 'unavailable';
       try {

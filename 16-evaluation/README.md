@@ -13,7 +13,7 @@ Hosted demo: **[windowai.danduh.me/evaluation/evaluation-demo](https://windowai.
 
 - A tiny **golden set** (four cases) mirroring the shipped `EVAL_CASES`: each is a
   trusted input, a plain-language rule, and a deterministic `check(output)` — a
-  Summarizer `tl;dr` (`≤ 40 words`), a Summarizer `key-points` (`≥ 2 lines`), a
+  Summarizer `tldr` (`≤ 40 words`), a Summarizer `key-points` (`≥ 2 lines`), a
   Translator (non-empty and different from the English input), and a Prompt case
   (`exactly yes/no`) the small model often fails.
 - **Rule-based scoring** — regular code, no second model — so the whole demo is
@@ -56,15 +56,18 @@ npx serve .
 Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 The Summarizer and Translator cases run on stable Chrome. The Prompt (`yes/no`)
-case needs the Prompt API executable — on stable builds that may mean Chrome
-Canary or flags; where it isn't, the demo reports those runs as ERROR, not FAIL.
+case needs the Prompt API executable — stable on the open web from Chrome 148,
+and on older builds it may still need Canary or flags; where it isn't executable,
+the demo reports those runs as ERROR, not FAIL.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a
-  non-metered connection for the one-time download.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform
+  16389.0.0+) on Chromebook Plus devices. No Android or iOS.
+- 22 GB of free disk gates the initial download; Chrome purges the model if free
+  space later falls below 10 GB. Plus a GPU with more than 4 GB of VRAM, or the
+  CPU path of 16 GB of RAM and 4+ CPU cores, and a non-metered connection for the
+  one-time download.
 - Built-in AI enabled. The Summarizer and Translator APIs are stable since Chrome
   138 and need no flags on current builds; the core Prompt API (`LanguageModel`)
   is stable on Chrome 148+ and may still need Canary or flags on older builds. If

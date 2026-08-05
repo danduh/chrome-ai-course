@@ -23,7 +23,8 @@ interface UserMessage {
 }
 
 interface DownloadProgressEvent {
-  loaded: number; // 0..1 fraction (no `total` in current builds)
+  loaded: number; // 0..1 fraction
+  total: number; // always 1 — `loaded` already is your fraction
 }
 
 interface CreateMonitor {
@@ -75,8 +76,8 @@ function setStatus(msg: string, cls?: 'ok' | 'warn' | 'err'): void {
   statusEl.textContent = msg;
 }
 
-// Probe multimodal availability. Older builds throw on the option — catch it
-// and report "unavailable" rather than exploding.
+// Probe multimodal availability. A build that doesn't recognise the option may
+// throw — catch it and report "unavailable" rather than exploding.
 async function getMultimodalAvailability(): Promise<Availability> {
   if (typeof LanguageModel === 'undefined') return 'unavailable';
   try {

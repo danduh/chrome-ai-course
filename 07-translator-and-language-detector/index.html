@@ -146,7 +146,7 @@
     }
 
     // Render the ranked detection results. Results arrive sorted by confidence
-    // descending and usually end with a trailing 'und' (unknown) entry.
+    // descending and always end with a trailing 'und' (unknown) entry.
     function renderDetection(results) {
       const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
       detectOut.innerHTML = results
@@ -189,7 +189,7 @@
       detector = await LanguageDetector.create({
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
-            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
             setStatus('Downloading the detector model… ' + Math.round(e.loaded * 100) + '%', 'warn');
           });
         },

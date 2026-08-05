@@ -65,8 +65,6 @@
         <option value="en" selected>en — English</option>
         <option value="es">es — Spanish</option>
         <option value="ja">ja — Japanese</option>
-        <option value="de">de — German</option>
-        <option value="fr">fr — French</option>
       </select>
     </div>
     <div class="col actions">
@@ -91,8 +89,8 @@
 
   <script>
     // Plain browser JS. No frameworks. Uses the raw `Proofreader` global.
-    // Proofreader is flag-gated (a lapsed origin trial), so availability() is
-    // usually "unavailable" until the user enables chrome://flags/#proofreader-api.
+    // Proofreader is flag-gated (origin trial in Chrome 141-145), so availability()
+    // is usually "unavailable" until the user enables chrome://flags/#proofreader-api.
     const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/proofreader';
     const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
     const LIVE_DEMO_URL = 'https://windowai.danduh.me/proofreader';
@@ -186,13 +184,10 @@
       setStatus('Preparing the model…', 'warn');
 
       const created = await Proofreader.create({
-        expectedInputLanguages: [lang],       // 'en' | 'es' | 'ja' | 'de' | 'fr'
-        includeCorrectionTypes: true,         // fill each correction's `types` array
-        includeCorrectionExplanations: true,  // add a human-readable `explanation`
-        correctionExplanationLanguage: 'en',  // explanation language, independent of the input
+        expectedInputLanguages: [lang],       // 'en' | 'es' | 'ja'
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
-            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            dlEl.value = e.loaded; // 0..1 fraction; e.total is always 1
             setStatus('Downloading adapter… ' + Math.round(e.loaded * 100) + '%', 'warn');
           });
         },
@@ -236,7 +231,7 @@
       }).join('');
     }
 
-    // Render each correction: original slice (by index), the suggestion, its types, and explanation.
+    // Render each correction: original slice (by index) and the suggestion.
     function renderList(input, corrections) {
       if (!corrections.length) {
         listEl.innerHTML = '<li>No corrections — the text is clean.</li>';
@@ -245,12 +240,8 @@
       listEl.innerHTML = corrections.map((c) => {
         const original = esc(input.slice(c.startIndex, c.endIndex));
         const correction = esc(c.correction);
-        const types = (c.types && c.types.length)
-          ? ' ' + c.types.map((t) => '<code>' + esc(t) + '</code>').join(' ')
-          : '';
-        const explanation = c.explanation ? ' — ' + esc(c.explanation) : '';
         return '<li>changed &ldquo;<del>' + original + '</del>&rdquo; &rarr; ' +
-          '&ldquo;<ins>' + correction + '</ins>&rdquo;' + types + explanation + '</li>';
+          '&ldquo;<ins>' + correction + '</ins>&rdquo;</li>';
       }).join('');
     }
 
@@ -287,13 +278,12 @@
             'Input is over the model quota (QuotaExceededError). Trim the text and try again.';
         } else if (name === 'NotSupportedError') {
           correctedEl.textContent =
-            'That language is not supported (NotSupportedError). Pick en, es, ja, de, or fr.';
-        } else if (name === 'InvalidStateError') {
-          correctedEl.textContent = 'That session was destroyed. Run again to recreate it.';
+            'That language is not supported (NotSupportedError). Pick en, es, or ja.';
+        } else if (name === 'AbortError') {
+          // Calling proofread() after destroy() rejects with AbortError; drop the stale session.
+          correctedEl.textContent = 'That session was aborted or destroyed. Run again to recreate it.';
           proofreader = null;
           proofreaderLang = null;
-        } else if (name === 'AbortError') {
-          correctedEl.textContent = 'Proofreading was aborted.';
         } else {
           correctedEl.textContent = 'Error: ' + errMessage(e);
         }

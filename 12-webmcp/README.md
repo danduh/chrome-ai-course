@@ -13,8 +13,9 @@ Hosted demo: **[windowai.danduh.me/webmcp/webmcp-demo](https://windowai.danduh.m
 
 - Registering tools on `document.modelContext`.
 - Registering three tools (`addItem`, `removeItem`, `listItems`) with `registerTool({ name, description, inputSchema, annotations, execute })`, each under one `AbortController`.
-- Tearing down every registration with a single `controller.abort()` on `beforeunload` (portable across Chrome 146–150; no `unregisterTool` needed).
+- Tearing down every registration with a single `controller.abort()` on `beforeunload` (the `AbortSignal` is the only teardown path — there is no `unregisterTool` or `clearContext`).
 - **One definition, two consumers:** the same `CART_TOOLS` array is registered on `document.modelContext` (for external agents) and dispatched into by the in-page agent loop.
+- `await`ing `registerTool` because it returns a Promise that rejects with `InvalidStateError` on a duplicate name (a synchronous `try/catch` would miss the async rejection).
 - Wiring an in-page `LanguageModel` agent that actually calls the tools: a session with a system prompt that lists the tools, looping prompt (with `responseConstraint: INTENT_SCHEMA`) → parse → run the tool → feed the result back, logging every call.
 - Coercing a WebMCP `execute` result (`Promise<unknown>`) to the string the agent loop feeds back.
 - Feature-detecting **both** `document.modelContext` and `LanguageModel`, degrading gracefully when either is missing (flag guidance + Setup + hosted-demo links) — the cart stays usable either way.
@@ -57,14 +58,14 @@ path.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- WebMCP enabled via `chrome://flags/#enable-webmcp-testing` (Chrome 149+ ships it as a public origin trial). The demo registers tools on `document.modelContext`.
-- Built-in AI available for the agent: ~22 GB free disk (Chrome stores the ~4 GB model), a GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a non-metered connection for the one-time download. If the demo says the model is missing, work through [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).
+- Desktop Chrome on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform 16389.0.0+) on Chromebook Plus devices — no Android or iOS.
+- WebMCP enabled via `chrome://flags/#enable-webmcp-testing` (early preview since Chrome 146; Chrome 149+ also offers a public origin trial). The demo registers tools on `document.modelContext`.
+- Built-in AI available for the agent: 22 GB free disk gates the one-time download (the model is purged if free space later drops below 10 GB), a GPU with more than 4 GB of VRAM — or the CPU path, which needs 16 GB RAM and 4+ CPU cores — and a non-metered connection for the download. If the demo says the model is missing, work through [Setup & the availability lifecycle](https://danduh.me/courses/chrome-built-in-ai/setup-and-availability).
 
 ## Caveat — don't ship this to production
 
 WebMCP is a W3C Draft Community Group Report, not a stable standard, and the
-surface is still moving (targeted to stabilize mid-to-late 2026). Build with it
-to learn; don't bet a product on it yet. Most users won't have it enabled, so any
+surface is still moving. Build with it to learn; don't bet a product on it yet.
+Most users won't have it enabled, so any
 page that uses it must stay useful without it — exactly what the degraded path
 here does.

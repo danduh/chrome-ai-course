@@ -7,10 +7,11 @@
 // --- Minimal ambient surface for Chrome's built-in Summarizer API (stable since Chrome 138) ---
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
 
-// NOTE: the TL;DR value is 'tl;dr' — with the semicolon. Not 'tldr'.
-type SummaryType = 'key-points' | 'tl;dr' | 'teaser' | 'headline';
+// NOTE: the TL;DR value is 'tldr' — no semicolon. 'tl;dr' throws a TypeError.
+type SummaryType = 'key-points' | 'tldr' | 'teaser' | 'headline';
 type SummaryFormat = 'markdown' | 'plain-text';
 type SummaryLength = 'short' | 'medium' | 'long';
+type PerformancePreference = 'auto' | 'speed' | 'capability';
 
 interface DownloadMonitor {
   addEventListener(
@@ -24,6 +25,13 @@ interface SummarizerCreateOptions {
   format?: SummaryFormat;
   length?: SummaryLength;
   sharedContext?: string;
+  // A performance hint plus BCP-47 language tags. Pass the same options to
+  // availability() as to create(); an unsupported language combo rejects with
+  // NotSupportedError.
+  preference?: PerformancePreference;
+  expectedInputLanguages?: string[];
+  expectedContextLanguages?: string[];
+  outputLanguage?: string;
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
@@ -121,7 +129,7 @@ async function init(): Promise<void> {
 // Build a fresh summarizer for the current options, wiring a download monitor.
 async function createSummarizer(): Promise<SummarizerInstance> {
   const options: SummarizerCreateOptions = {
-    type: typeEl.value as SummaryType, // 'key-points' | 'tl;dr' | 'teaser' | 'headline'
+    type: typeEl.value as SummaryType, // 'key-points' | 'tldr' | 'teaser' | 'headline'
     format: formatEl.value as SummaryFormat, // 'markdown' | 'plain-text'
     length: lengthEl.value as SummaryLength, // 'short' | 'medium' | 'long'
   };
@@ -136,7 +144,7 @@ async function createSummarizer(): Promise<SummarizerInstance> {
     ...options,
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
         setStatus(
           'Downloading model… ' + Math.round(e.loaded * 100) + '%',
           'warn',
@@ -179,8 +187,12 @@ async function run(): Promise<void> {
         'sections and summarize each, then summarize the summaries.';
     } else if (name === 'NotSupportedError') {
       outputEl.textContent =
-        'That type/format/length combo is not supported here (NotSupportedError). Try another.';
-    } else if (name === 'InvalidStateError') {
+        'This configuration is not supported here (NotSupportedError) — usually an ' +
+        'unsupported language combo. Try different options.';
+    } else if (name === 'TypeError') {
+      outputEl.textContent =
+        'Invalid option value (TypeError). The TL;DR type is "tldr", no semicolon.';
+    } else if (name === 'AbortError') {
       outputEl.textContent = 'That summarizer was destroyed. Run again to recreate it.';
       summarizer = null;
     } else {

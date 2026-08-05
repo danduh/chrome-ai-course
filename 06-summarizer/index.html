@@ -42,7 +42,7 @@
     <label for="source">Text to summarize</label>
     <textarea id="source" rows="8">Chrome's built-in AI ships Gemini Nano, a small language model, directly inside the browser. The model runs on the user's own device, so inference never leaves the machine: there is no backend to operate, no API key to rotate, and no per-token bill to watch. For a whole category of features that used to require a server round-trip, the cost, the latency, and the data-egress risk all drop toward zero.
 
-The trade-offs are real, though. The model is a one-time multi-gigabyte download that blocks the very first create() call until it finishes, so any serious feature has to show download progress instead of freezing on a dead button. Built-in AI is desktop-only today — no Android, no iOS, no ChromeOS — and it is hardware-dependent, so a machine under the bar simply reports the API as unavailable and stays there.
+The trade-offs are real, though. The model is a one-time multi-gigabyte download that blocks the very first create() call until it finishes, so any serious feature has to show download progress instead of freezing on a dead button. Built-in AI is desktop-only today — Windows, macOS, Linux, or ChromeOS on Chromebook Plus, but no Android or iOS — and it is hardware-dependent, so a machine under the bar simply reports the API as unavailable and stays there.
 
 The practical guidance most teams land on is to pick the tool for the job. Use the on-device model for the large share of tasks that don't need frontier-scale reasoning — summarizing, drafting, classifying, translating — and reserve a cloud model for the genuinely hard remainder. Most teams badly overestimate how often that remainder actually shows up in their product.</textarea>
   </div>
@@ -52,7 +52,7 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
       <label for="type">type</label>
       <select id="type">
         <option value="key-points" selected>key-points</option>
-        <option value="tl;dr">tl;dr</option>
+        <option value="tldr">tldr</option>
         <option value="teaser">teaser</option>
         <option value="headline">headline</option>
       </select>
@@ -150,7 +150,7 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
     // Build a fresh summarizer for the current options, wiring a download monitor.
     async function createSummarizer() {
       const options = {
-        type: typeEl.value,      // 'key-points' | 'tl;dr' | 'teaser' | 'headline'
+        type: typeEl.value,      // 'key-points' | 'tldr' | 'teaser' | 'headline'
         format: formatEl.value,  // 'markdown' | 'plain-text'
         length: lengthEl.value,  // 'short' | 'medium' | 'long'
       };
@@ -165,7 +165,7 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
         ...options,
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
-            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
             setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
           });
         },
@@ -205,8 +205,12 @@ The practical guidance most teams land on is to pick the tool for the job. Use t
             'sections and summarize each, then summarize the summaries.';
         } else if (name === 'NotSupportedError') {
           outputEl.textContent =
-            'That type/format/length combo is not supported here (NotSupportedError). Try another.';
-        } else if (name === 'InvalidStateError') {
+            'This configuration is not supported here (NotSupportedError) — usually an ' +
+            'unsupported language combo. Try different options.';
+        } else if (name === 'TypeError') {
+          outputEl.textContent =
+            'Invalid option value (TypeError). The TL;DR type is "tldr", no semicolon.';
+        } else if (name === 'AbortError') {
           outputEl.textContent = 'That summarizer was destroyed. Run again to recreate it.';
           summarizer = null;
         } else {

@@ -14,7 +14,7 @@ interface DownloadMonitor {
 }
 
 interface SummarizerCreateOptions {
-  type?: 'key-points' | 'tl;dr' | 'teaser' | 'headline';
+  type?: 'key-points' | 'tldr' | 'teaser' | 'headline';
   format?: 'markdown' | 'plain-text';
   outputLanguage?: string;
   monitor?: (m: DownloadMonitor) => void;

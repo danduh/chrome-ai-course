@@ -186,7 +186,7 @@ async function ensureSession(): Promise<LanguageModelSession> {
     expectedOutputs: [{ type: 'text', languages: ['en'] }],
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        // e.loaded is a 0..1 fraction — there is no e.total in current builds.
+        // e.loaded is a 0..1 fraction — e.total exists but is always 1.
         progressEl.value = e.loaded;
         setStatus(
           'Downloading Gemini Nano… ' + Math.round(e.loaded * 100) + '%',

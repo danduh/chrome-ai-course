@@ -59,11 +59,13 @@ Standard shipping takes three to five business days.</textarea>
   </div>
 
   <div class="actions">
-    <button id="run" disabled>Embed &amp; search</button>
+    <button id="index">Index documents</button>
+    <button id="run" disabled>Search</button>
   </div>
 
-  <p class="hint">Documents are embedded with <code>taskType: 'retrieval-document'</code>,
-    the query with <code>'retrieval-query'</code>, then ranked by cosine similarity in plain JS.</p>
+  <p class="hint">Index once — the documents are embedded with <code>taskType: 'retrieval-document'</code>
+    and cached. Each search embeds only the query with <code>'retrieval-query'</code>, then ranks by
+    cosine similarity in plain JS. One embedder, reused across searches.</p>
   <div id="output" class="output" aria-live="polite"></div>
 
   <script>
@@ -73,7 +75,7 @@ Standard shipping takes three to five business days.</textarea>
     const SETUP_URL = 'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
     const LIVE_DEMO_URL = 'https://windowai.danduh.me/embeddings';
 
-    // taskType lives on embed(), NOT create(). create() takes no arguments.
+    // taskType lives on embed(), NOT create(). create() takes { signal, monitor } options.
     const DOC_TASK = 'retrieval-document';
     const QUERY_TASK = 'retrieval-query';
 
@@ -81,10 +83,14 @@ Standard shipping takes three to five business days.</textarea>
     const prepEl = document.getElementById('prep');
     const docsEl = document.getElementById('docs');
     const queryEl = document.getElementById('query');
+    const indexBtn = document.getElementById('index');
     const runBtn = document.getElementById('run');
     const outputEl = document.getElementById('output');
 
+    // One embedder, reused across searches. docVectors caches the indexed corpus so a
+    // search only has to embed the query — never re-embed every document.
     let embedder = null;
+    let docVectors = null; // [{ text, values }] after indexing
     let busy = false;
 
     function setStatus(html, kind) {
@@ -92,14 +98,23 @@ Standard shipping takes three to five business days.</textarea>
       statusEl.innerHTML = html;
     }
 
+    function setBusy(on) {
+      busy = on;
+      indexBtn.disabled = on;
+      // Search stays disabled until there's an index to search.
+      runBtn.disabled = on || !docVectors;
+    }
+
     function degrade(reason) {
       setStatus(
         reason +
-          ' This is an Early Preview API — enable <code>#semantic-embedder-api</code> in ' +
-          'Chrome 152+ Canary. Work through <a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
+          ' This is an experimental API (Intent to Prototype) — enable ' +
+          '<code>#semantic-embedder-api</code> in Chrome Canary. Work through ' +
+          '<a href="' + SETUP_URL + '">Setup &amp; availability</a>, ' +
           'or try the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.',
         'err'
       );
+      indexBtn.disabled = true;
       runBtn.disabled = true;
     }
 
@@ -124,25 +139,40 @@ Standard shipping takes three to five business days.</textarea>
       return denom === 0 ? 0 : dot / denom;
     }
 
-    // No downloadprogress event exists for SemanticEmbedder yet, and create() throws
-    // if the model isn't ready — so poll availability() until 'available', then create().
-    async function waitUntilAvailable() {
-      const timeoutMs = 5 * 60 * 1000;
-      const start = Date.now();
-      let state = await SemanticEmbedder.availability();
-      while (state !== 'available') {
-        if (state === 'unavailable') {
-          throw new Error('SemanticEmbedder is not available on this device.');
-        }
-        if (Date.now() - start > timeoutMs) {
-          throw new Error('The embedding model is still preparing — try again shortly.');
-        }
-        prepEl.hidden = false; // indeterminate bar (no percentage available)
-        setStatus('Preparing the on-device model (first-run download can take a minute)…', 'warn');
-        await new Promise((r) => setTimeout(r, 1500));
-        state = await SemanticEmbedder.availability();
-      }
+    // One embedder for the whole page. create() accepts { signal, monitor }; the monitor's
+    // downloadprogress event carries e.loaded (0..1). Starting the DOWNLOAD needs a user
+    // gesture, so this only ever runs from a button click.
+    async function ensureEmbedder() {
+      if (embedder) return embedder;
+      embedder = await SemanticEmbedder.create({
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            prepEl.hidden = false;
+            prepEl.value = e.loaded; // 0..1; e.total is always 1
+            setStatus('Downloading the on-device model… ' + Math.round(e.loaded * 100) + '%', 'warn');
+          });
+        },
+      });
       prepEl.hidden = true;
+      return embedder;
+    }
+
+    function readDocs() {
+      return docsEl.value.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+    }
+
+    function handleError(e) {
+      const name = e && e.name ? e.name : 'Error';
+      if (name === 'QuotaExceededError') {
+        outputEl.textContent =
+          'An input was too long for the model (QuotaExceededError). Shorten the longest line and retry.';
+      } else if (name === 'NotSupportedError') {
+        outputEl.textContent =
+          'That input or option is not supported in this build (NotSupportedError).';
+      } else {
+        outputEl.textContent = 'Error: ' + (e && e.message ? e.message : name);
+      }
+      setStatus('Error: ' + name + '.', 'err');
     }
 
     // Feature-detect + availability() gate before anything else.
@@ -166,11 +196,11 @@ Standard shipping takes three to five business days.</textarea>
       }
 
       if (status === 'available') {
-        setStatus('Model ready. Edit the documents or query and hit Embed &amp; search.', 'ok');
+        setStatus('Model ready. Index the documents, then search.', 'ok');
       } else {
-        setStatus('Model needs a one-time download (~200 MB). It starts on your first search.', 'warn');
+        setStatus('Model needs a one-time download. It starts, with a progress bar, when you index.', 'warn');
       }
-      runBtn.disabled = false;
+      indexBtn.disabled = false; // search unlocks after the first index
     }
 
     function render(ranked) {
@@ -189,63 +219,69 @@ Standard shipping takes three to five business days.</textarea>
         .join('');
     }
 
-    async function run() {
-      const documents = docsEl.value.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-      const query = queryEl.value.trim();
+    // INDEX STEP — embed the corpus once (retrieval-document) and cache the vectors.
+    async function indexDocuments() {
       if (busy) return;
+      const documents = readDocs();
       if (documents.length === 0) { setStatus('Add at least one document line.', 'warn'); return; }
-      if (!query) { setStatus('Type a query to rank against.', 'warn'); return; }
 
-      busy = true;
-      runBtn.disabled = true;
+      setBusy(true);
       outputEl.textContent = '';
-
       try {
-        // Poll until the model is ready, THEN create() (no arguments) — see waitUntilAvailable.
-        await waitUntilAvailable();
-        // One embedder for the whole run; destroyed in finally.
-        embedder = await SemanticEmbedder.create();
-
-        setStatus('Embedding ' + documents.length + ' documents and the query…', 'warn');
-
-        // Batch the corpus (retrieval-document); results are positional.
-        const docRes = await embedder.embed(documents, { taskType: DOC_TASK });
-        // The user's query (retrieval-query) — the asymmetric pair beats matching sides.
-        const queryRes = await embedder.embed(query, { taskType: QUERY_TASK });
-        const queryVec = queryRes.embeddings[0].values;
-
-        const ranked = documents
-          .map((text, i) => ({
-            text,
-            score: cosineSimilarity(queryVec, docRes.embeddings[i].values),
-          }))
-          .sort((a, b) => b.score - a.score);
-
-        render(ranked);
-        setStatus('Ranked ' + documents.length + ' documents by cosine similarity. Edit and run again.', 'ok');
+        await ensureEmbedder(); // create() (with monitor) — first click starts the download
+        setStatus('Embedding ' + documents.length + ' documents (retrieval-document)…', 'warn');
+        // Batch the corpus; results are positional, so embeddings[i] matches documents[i].
+        const res = await embedder.embed(documents, { taskType: DOC_TASK });
+        docVectors = documents.map((text, i) => ({ text, values: res.embeddings[i].values }));
+        setStatus('Indexed ' + documents.length + ' documents. Type a query and search.', 'ok');
       } catch (e) {
-        const name = e && e.name ? e.name : 'Error';
-        if (name === 'QuotaExceededError') {
-          outputEl.textContent =
-            'An input is over the model quota (QuotaExceededError). Shorten the longest line and retry.';
-        } else if (name === 'NotSupportedError') {
-          outputEl.textContent =
-            'That input or option is not supported in this build (NotSupportedError).';
-        } else {
-          outputEl.textContent = 'Error: ' + (e && e.message ? e.message : name);
-        }
-        setStatus('Error: ' + name + '.', 'err');
+        docVectors = null;
+        handleError(e);
       } finally {
-        // Free the model even if embed() threw. create() per run keeps the lifecycle obvious;
-        // in production you can hold ONE embedder and reuse it across searches instead.
-        if (embedder) { embedder.destroy(); embedder = null; }
         prepEl.hidden = true;
-        busy = false;
-        runBtn.disabled = false;
+        setBusy(false);
       }
     }
 
-    runBtn.addEventListener('click', run);
+    // SEARCH STEP — embed ONLY the query (retrieval-query), reuse the cached corpus + session.
+    async function search() {
+      if (busy) return;
+      if (!docVectors) { setStatus('Index the documents first.', 'warn'); return; }
+      const query = queryEl.value.trim();
+      if (!query) { setStatus('Type a query to rank against.', 'warn'); return; }
+
+      setBusy(true);
+      outputEl.textContent = '';
+      try {
+        await ensureEmbedder(); // same session — no re-create, no re-embedding the corpus
+        setStatus('Embedding the query (retrieval-query)…', 'warn');
+        const res = await embedder.embed(query, { taskType: QUERY_TASK });
+        const queryVec = res.embeddings[0].values;
+
+        const ranked = docVectors
+          .map((d) => ({ text: d.text, score: cosineSimilarity(queryVec, d.values) }))
+          .sort((a, b) => b.score - a.score);
+
+        render(ranked);
+        setStatus('Ranked ' + docVectors.length + ' documents by cosine similarity.', 'ok');
+      } catch (e) {
+        handleError(e);
+      } finally {
+        prepEl.hidden = true;
+        setBusy(false);
+      }
+    }
+
+    indexBtn.addEventListener('click', indexDocuments);
+    runBtn.addEventListener('click', search);
+
+    // Editing the corpus invalidates the cached index — re-index before searching again.
+    docsEl.addEventListener('input', () => {
+      if (!docVectors) return;
+      docVectors = null;
+      runBtn.disabled = true;
+      setStatus('Documents changed — re-index before searching.', 'warn');
+    });
 
     // Free the model on teardown so a closed tab doesn't strand a session.
     window.addEventListener('beforeunload', () => {

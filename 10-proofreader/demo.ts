@@ -4,27 +4,19 @@
 // built or loaded by the page. The @types/dom-chromium-ai package ships fuller
 // declarations; the minimal ambient surface below keeps this file self-contained.
 
-// --- Minimal ambient surface for Chrome's Proofreader API (flag-gated as of Chrome 150) ---
+// --- Minimal ambient surface for Chrome's Proofreader API ---
+// Flag-gated behind chrome://flags/#proofreader-api; shipped as an origin trial in Chrome 141–145.
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
 
-// The five adapter languages the Proofreader ships today.
-type ProofreaderLanguageCode = 'en' | 'es' | 'ja' | 'de' | 'fr';
+// The adapter languages Chrome's build accepts today.
+type ProofreaderLanguageCode = 'en' | 'es' | 'ja';
 
-// NOTE: the correction category field is `types` — plural, an array. Not `type`.
-type ProofreaderCorrectionType =
-  | 'spelling'
-  | 'punctuation'
-  | 'capitalization'
-  | 'preposition'
-  | 'missing-words'
-  | 'grammar';
-
+// The shipped correction is just a positioned edit. The explainer's `types` and
+// `explanation` fields aren't implemented in Chrome's current build.
 interface ProofreaderCorrection {
   startIndex: number;
   endIndex: number;
   correction: string;
-  types?: ProofreaderCorrectionType[]; // filled when includeCorrectionTypes is true
-  explanation?: string; // filled when includeCorrectionExplanations is true
 }
 
 interface ProofreadResult {
@@ -41,9 +33,6 @@ interface DownloadMonitor {
 
 interface ProofreaderCreateOptions {
   expectedInputLanguages?: string[];
-  includeCorrectionTypes?: boolean;
-  includeCorrectionExplanations?: boolean;
-  correctionExplanationLanguage?: string;
   signal?: AbortSignal;
   monitor?: (m: DownloadMonitor) => void;
 }
@@ -188,13 +177,10 @@ async function ensureSession(): Promise<ProofreaderInstance> {
   setStatus('Preparing the model…', 'warn');
 
   const created = await Proofreader.create({
-    expectedInputLanguages: [lang], // 'en' | 'es' | 'ja' | 'de' | 'fr'
-    includeCorrectionTypes: true, // fill each correction's `types` array
-    includeCorrectionExplanations: true, // add a human-readable `explanation`
-    correctionExplanationLanguage: 'en', // explanation language, independent of the input
+    expectedInputLanguages: [lang], // 'en' | 'es' | 'ja'
     monitor(m: DownloadMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // 0..1 fraction; e.total is always 1
         setStatus(
           'Downloading adapter… ' + Math.round(e.loaded * 100) + '%',
           'warn',
@@ -249,7 +235,7 @@ function renderDiff(
     .join('');
 }
 
-// Render each correction: original slice (by index), the suggestion, its types, and explanation.
+// Render each correction: original slice (by index) and the suggestion.
 function renderList(
   input: string,
   corrections: ProofreaderCorrection[],
@@ -262,21 +248,12 @@ function renderList(
     .map((c) => {
       const original = esc(input.slice(c.startIndex, c.endIndex));
       const correction = esc(c.correction);
-      const types =
-        c.types && c.types.length
-          ? ' ' +
-            c.types.map((t) => '<code>' + esc(t) + '</code>').join(' ')
-          : '';
-      const explanation = c.explanation ? ' — ' + esc(c.explanation) : '';
       return (
         '<li>changed &ldquo;<del>' +
         original +
         '</del>&rdquo; &rarr; &ldquo;<ins>' +
         correction +
-        '</ins>&rdquo;' +
-        types +
-        explanation +
-        '</li>'
+        '</ins>&rdquo;</li>'
       );
     })
     .join('');
@@ -319,13 +296,12 @@ async function run(): Promise<void> {
         'Input is over the model quota (QuotaExceededError). Trim the text and try again.';
     } else if (name === 'NotSupportedError') {
       correctedEl.textContent =
-        'That language is not supported (NotSupportedError). Pick en, es, ja, de, or fr.';
-    } else if (name === 'InvalidStateError') {
-      correctedEl.textContent = 'That session was destroyed. Run again to recreate it.';
+        'That language is not supported (NotSupportedError). Pick en, es, or ja.';
+    } else if (name === 'AbortError') {
+      // Calling proofread() after destroy() rejects with AbortError; drop the stale session.
+      correctedEl.textContent = 'That session was aborted or destroyed. Run again to recreate it.';
       proofreader = null;
       proofreaderLang = null;
-    } else if (name === 'AbortError') {
-      correctedEl.textContent = 'Proofreading was aborted.';
     } else {
       correctedEl.textContent = 'Error: ' + errMessage(e);
     }

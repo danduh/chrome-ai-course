@@ -41,10 +41,12 @@ Then open the printed `http://localhost:…` URL in desktop Chrome.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- Around 22 GB of free disk (Chrome stores the ~4 GB model and purges it below
-  that, or after 30 days idle), a GPU with more than 4 GB of VRAM (or a 16 GB-RAM
-  tier machine), and a non-metered connection for the one-time download.
+- **Desktop Chrome** (Windows 10/11, macOS 13+, Linux, or ChromeOS Platform
+  16389.0.0+ on a Chromebook Plus). No Android or iOS.
+- Around 22 GB of free disk to start the download (Chrome stores the ~4 GB model
+  and purges it if free space later drops under 10 GB, or after 30 days idle), a
+  GPU with more than 4 GB of VRAM — or the CPU path, which needs 16 GB of RAM and
+  4-plus CPU cores — and a non-metered connection for the one-time download.
 - Built-in AI enabled. On current stable Chrome the core Prompt API needs no
   flags — the model downloads on first `create()`. If the panel reports
   `unavailable`, work through

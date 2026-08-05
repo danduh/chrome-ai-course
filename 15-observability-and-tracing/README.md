@@ -57,10 +57,12 @@ To watch the tracer wrap a call in DevTools, open the Console before you hit
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a
-  non-metered connection for the one-time download.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS
+  (Platform 16389.0.0+) on Chromebook Plus devices — no Android or iOS.
+- ~22 GB free disk gates the one-time download; Chrome purges the model if free
+  space later falls below 10 GB. Plus a GPU with more than 4 GB of VRAM, or the
+  CPU path (16 GB of RAM and 4+ CPU cores), and a non-metered connection for the
+  download.
 - Built-in AI enabled. The Summarizer API is stable since Chrome 138 and needs no
   flags on current builds; the core Prompt API (`LanguageModel`) is stable on
   Chrome 148+ and may still need Canary or flags on older builds — which is why

@@ -206,7 +206,7 @@
         expectedOutputs: [{ type: 'text', languages: ['en'] }],
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
-            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            dlEl.value = e.loaded; // e.loaded is a 0..1 fraction; e.total is always 1
             setStatus('Downloading model… ' + Math.round(e.loaded * 100) + '%', 'warn');
           });
         },

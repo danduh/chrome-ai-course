@@ -234,19 +234,24 @@
     ];
 
     // --- Register every tool under one AbortController. controller.abort()
-    // unregisters the whole set (portable across Chrome 146-150). --------------
-    const DUPLICATE_NAME_PATTERN = /duplicate tool name|already registered/i;
+    // unregisters the whole set — the AbortSignal is the only teardown path. ---
+    function isDuplicateName(e) {
+      if (!(e instanceof Error)) return false;
+      return e.name === 'InvalidStateError' || /duplicate tool name/i.test(e.message);
+    }
 
-    function registerTools() {
+    async function registerTools() {
       controller = new AbortController();
       let registered = 0;
       for (const tool of CART_TOOLS) {
         try {
-          modelContext.registerTool(tool, { signal: controller.signal });
+          // registerTool returns a Promise that REJECTS on a duplicate name —
+          // await it so the rejection is catchable; a sync try/catch would miss it.
+          await modelContext.registerTool(tool, { signal: controller.signal });
           registered++;
         } catch (e) {
-          // Double-register throws "duplicate tool name" — treat as already-there.
-          if (DUPLICATE_NAME_PATTERN.test(e && e.message ? e.message : '')) {
+          // Duplicate name rejects with InvalidStateError — treat as already-there.
+          if (isDuplicateName(e)) {
             registered++;
             continue;
           }
@@ -338,7 +343,7 @@
         initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }],
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => {
-            dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+            dlEl.value = e.loaded; // e.loaded is a 0..1 fraction (e.total is always 1)
             setStatus('Downloading model\u2026 ' + Math.round(e.loaded * 100) + '%', 'warn');
           });
         },
@@ -440,7 +445,7 @@
           'or open the <a href="' + LIVE_DEMO_URL + '">hosted demo</a>.';
       } else {
         try {
-          const count = registerTools();
+          const count = await registerTools();
           renderTools(count);
         } catch (e) {
           renderTools(0);
@@ -461,7 +466,12 @@
       }
       let status;
       try {
-        status = await LanguageModel.availability();
+        // Pass availability() the SAME options you pass to create() so the
+        // check matches the session you'll actually build.
+        status = await LanguageModel.availability({
+          expectedInputs:  [{ type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        });
       } catch (e) {
         setStatus('<code>availability()</code> threw: ' + (e && e.message ? e.message : e) + '.', 'err');
         return;

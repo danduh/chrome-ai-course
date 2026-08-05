@@ -7,7 +7,7 @@
 // --- Minimal ambient surface for Chrome's Translator + LanguageDetector (current stable) ---
 type Availability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
 
-interface DownloadMonitor {
+interface CreateMonitor {
   addEventListener(
     type: 'downloadprogress',
     listener: (e: ProgressEvent) => void,
@@ -22,7 +22,7 @@ interface LanguageDetectionResult {
 interface LanguageDetectorCreateOptions {
   expectedInputLanguages?: string[];
   signal?: AbortSignal;
-  monitor?: (m: DownloadMonitor) => void;
+  monitor?: (m: CreateMonitor) => void;
 }
 
 interface LanguageDetectorInstance {
@@ -46,7 +46,7 @@ interface TranslatorCreateOptions {
   sourceLanguage: string;
   targetLanguage: string;
   signal?: AbortSignal;
-  monitor?: (m: DownloadMonitor) => void;
+  monitor?: (m: CreateMonitor) => void;
 }
 
 interface TranslatorInstance {
@@ -161,7 +161,7 @@ function errMessage(e: unknown): string {
 }
 
 // Render the ranked detection results. Results arrive sorted by confidence
-// descending and usually end with a trailing 'und' (unknown) entry.
+// descending and always end with a trailing 'und' (unknown) entry.
 function renderDetection(results: LanguageDetectionResult[]): void {
   const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
   detectOut.innerHTML = results
@@ -210,9 +210,9 @@ async function ensureDetector(): Promise<LanguageDetectorInstance> {
   dlEl.hidden = false;
   dlEl.value = 0;
   detector = await LanguageDetector.create({
-    monitor(m: DownloadMonitor) {
+    monitor(m: CreateMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
-        dlEl.value = e.loaded; // 0..1 fraction, no e.total in current builds
+        dlEl.value = e.loaded; // 0..1 fraction; e.total exists and is always 1
         setStatus(
           'Downloading the detector model… ' + Math.round(e.loaded * 100) + '%',
           'warn',
@@ -297,7 +297,7 @@ async function ensureTranslator(
   translator = await Translator.create({
     sourceLanguage,
     targetLanguage,
-    monitor(m: DownloadMonitor) {
+    monitor(m: CreateMonitor) {
       m.addEventListener('downloadprogress', (e: ProgressEvent) => {
         dlEl.value = e.loaded; // 0..1 fraction
         setStatus(

@@ -1,8 +1,8 @@
 # 14 — An MCP client in the browser
 
 The inverse of WebMCP: instead of the page exposing tools, the page is the MCP
-**client**. It runs the JSON-RPC handshake (`initialize` → `tools/list`) against
-an MCP server over Streamable HTTP, then hands the discovered tools to Chrome's
+**client**. It runs the modern JSON-RPC flow (`server/discover` → `tools/list`)
+against an MCP server over Streamable HTTP, then hands the discovered tools to Chrome's
 built-in `LanguageModel` (Gemini Nano), which drives them through a
 `responseConstraint` intent loop — each tool call becomes a `tools/call` request to
 the server. No frameworks, no SDK, no build step — plain browser JavaScript,
@@ -14,17 +14,19 @@ Hosted demo: **[windowai.danduh.me/mcp-client/mcp-client-demo](https://windowai.
 
 ## What it shows
 
-- **A mock MCP server, in-page (default).** An object that answers `initialize`,
-  `tools/list`, and `tools/call` for three demo tools (`add`, `multiply`,
-  `echo`), so the full connect → discover → agent-loop path runs offline — no
-  network, no CORS, no server to install.
+- **A mock MCP server, in-page (default).** An object that answers
+  `server/discover`, `tools/list`, and `tools/call` for three demo tools (`add`,
+  `multiply`, `echo`), so the full connect → discover → agent-loop path runs
+  offline — no network, no CORS, no server to install.
 - **A raw Streamable HTTP transport.** Switch to "Remote MCP server (URL)" and
   the same client code POSTs JSON-RPC 2.0 to a real endpoint via `fetch`, sending
-  `Accept: application/json, text/event-stream`, capturing the `Mcp-Session-Id`
-  from the initialize response, and parsing either a JSON or an SSE reply.
-- **The handshake, by hand:** `initialize` → `notifications/initialized` →
-  `tools/list`, then `tools/call` on demand — the exact JSON-RPC an SDK would
-  send, written out so you can see the wire.
+  `Accept: application/json, text/event-stream`, the per-request `_meta` and the
+  `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` mirror headers, and parsing
+  either a JSON or an SSE reply.
+- **The modern flow, by hand:** `server/discover` → `tools/list`, then
+  `tools/call` on demand — no `initialize` handshake and no session, since MCP
+  revision `2026-07-28` conveys the protocol version and client identity in each
+  request's `_meta` instead. Written out so you can see the wire.
 - **The bridge to Gemini Nano:** a session created with a system prompt listing
   the server's tools; each turn prompts with `responseConstraint: INTENT_SCHEMA`
   (`{ toolName, args, reply }`), parses (fence-stripping guard), dispatches the
@@ -36,9 +38,10 @@ Hosted demo: **[windowai.danduh.me/mcp-client/mcp-client-demo](https://windowai.
 - Graceful degradation: connecting and browsing tools works without Gemini Nano;
   only the agent step needs the Prompt API, so it's gated on its own.
 
-The intent loop is the reliable path because native `tools` was unreliable on the
-Chrome build this was written against; the loop leans only on `responseConstraint`.
-The lesson covers both.
+The intent loop is the pattern because there is no native `tools` array to reach
+for: passing tools to `LanguageModel.create()` isn't a supported browser feature,
+so the loop leans only on `responseConstraint`, which ships. The lesson walks
+through it.
 
 ## Files
 
@@ -69,12 +72,17 @@ every request to a remote server is a cross-origin `fetch`, and the browser
 enforces CORS. For a real connection to succeed, the server must:
 
 - send `Access-Control-Allow-Origin` for this page's origin (or `*`);
-- list `Mcp-Session-Id` in `Access-Control-Expose-Headers` (the Streamable HTTP
-  transport reads the session id from that response header — if the browser can't
-  see it, follow-up requests fail with "missing session ID");
-- allow `Authorization`, `Content-Type`, `Mcp-Session-Id`, and
-  `Mcp-Protocol-Version` in `Access-Control-Allow-Headers`;
-- answer the `OPTIONS` preflight for `POST`, `GET`, and `DELETE`.
+- allow `Content-Type`, `Authorization`, `MCP-Protocol-Version`, `Mcp-Method`,
+  and `Mcp-Name` in `Access-Control-Allow-Headers` (these non-simple request
+  headers trigger a preflight the server has to answer, or the real POST never
+  goes out);
+- answer the `OPTIONS` preflight for `POST` — modern Streamable HTTP is
+  POST-only, since revision `2026-07-28` removed the `GET` stream and `DELETE`
+  teardown.
+
+(A legacy, handshake-era server needs one extra: it mints an `Mcp-Session-Id`
+response header the browser only surfaces if it's listed in
+`Access-Control-Expose-Headers`.)
 
 Most public MCP servers assume a native client and send none of these — they
 won't connect from a browser. Two ways around it:
@@ -82,8 +90,9 @@ won't connect from a browser. Two ways around it:
 1. **Run a server you control** with permissive CORS.
 2. **Run a small CORS proxy** and point the demo at it. A proxy is a dependency-
    free Node relay: `browser → http://localhost:PORT → target server`
-   (server-to-server, no CORS), injecting the CORS headers on the way back and
-   exposing `Mcp-Session-Id`. There are two shapes:
+   (server-to-server, no CORS), injecting the CORS headers on the way back —
+   allowing the `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` request headers
+   (and, for a legacy server, exposing `Mcp-Session-Id`). There are two shapes:
    - **Baked-in target** (like the repo's `mcp-cors-proxy.mjs`): the proxy is
      started with the target URL in an env var, so you put the *proxy's own*
      address in the demo's Server URL field and leave the proxy-prefix blank —
@@ -100,10 +109,12 @@ long-lived admin credential.
 
 ## Requirements
 
-- **Desktop Chrome** (Windows 10+, macOS 13+, or Linux). No Android, iOS, or ChromeOS.
-- ~22 GB free disk (Chrome stores the ~4 GB model and purges it below that), a
-  GPU with more than 4 GB of VRAM (or a 16 GB-RAM tier machine), and a
-  non-metered connection for the one-time download.
+- **Desktop Chrome** on Windows 10/11, macOS 13+, Linux, or ChromeOS (Platform
+  16389.0.0+) on Chromebook Plus devices — no Android or iOS.
+- ~22 GB free disk gates the download; Chrome removes the model if free space
+  later drops below 10 GB. Either a GPU with more than 4 GB of VRAM, or a CPU-only
+  machine with 16 GB of RAM and 4+ cores, plus a non-metered connection for the
+  one-time download.
 - Built-in AI enabled. On current stable Chrome the core Prompt API needs no
   flags — the model downloads on first `create()`. If the demo says the API is
   missing, work through
