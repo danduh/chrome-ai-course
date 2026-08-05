@@ -66,7 +66,7 @@ interface DiffSegment {
 const LESSON_URL = 'https://danduh.me/courses/chrome-built-in-ai/proofreader';
 const SETUP_URL =
   'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
-const LIVE_DEMO_URL = 'https://windowai.danduh.me/proofreader';
+const LIVE_DEMO_URL = 'https://windowai.danduh.me/proofreader/proofreader-demo';
 const FLAG = '#proofreader-api';
 
 const statusEl = document.getElementById('status') as HTMLDivElement;

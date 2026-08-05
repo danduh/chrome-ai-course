@@ -85,7 +85,7 @@ const LESSON_URL =
   'https://danduh.me/courses/chrome-built-in-ai/live-voice-translation';
 const SETUP_URL =
   'https://danduh.me/courses/chrome-built-in-ai/setup-and-availability';
-const LIVE_DEMO_URL = 'https://windowai.danduh.me/live-translate';
+const LIVE_DEMO_URL = 'https://windowai.danduh.me/live-translate/live-translate-demo';
 
 interface Lang {
   code: string;
